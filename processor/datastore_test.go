@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudbox/autoscan"
-	"github.com/cloudbox/autoscan/migrate"
+	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/migrate"
 
 	// sqlite3 driver
 	_ "modernc.org/sqlite"

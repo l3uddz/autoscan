@@ -1,24 +1,30 @@
-FROM sc4h/alpine-s6overlay:v2-3.15
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+
+FROM alpine:3.20 AS rootfs
+RUN apk add --no-cache ca-certificates tzdata
+
+FROM scratch
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 
 ENV \
-  PATH="/app/autoscan:${PATH}" \
+  PATH="/app" \
   AUTOSCAN_CONFIG="/config/config.yml" \
   AUTOSCAN_DATABASE="/config/autoscan.db" \
   AUTOSCAN_LOG="/config/activity.log" \
   AUTOSCAN_VERBOSITY="0"
 
-# Binary
-COPY ["dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}/autoscan", "/app/autoscan/autoscan"]
+COPY --from=rootfs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=rootfs /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Add root files
-COPY ["docker/run", "/etc/services.d/autoscan/run"]
+COPY ["dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}/autoscan", "/app/autoscan"]
 
-# Volume
 VOLUME ["/config"]
 
-# Port
 EXPOSE 3030
+
+ENTRYPOINT ["/app/autoscan"]

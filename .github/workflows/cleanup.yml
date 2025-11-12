@@ -23,4 +23,4 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           tag: ${{ steps.dockertag.outputs.replaced }}
         run: |
-          docker run --rm lumir/remove-dockerhub-tag --user "$username" --password "$password" cloudb0x/autoscan:$tag
+          docker run --rm lumir/remove-dockerhub-tag --user "$username" --password "$password" l3uddz/autoscan:$tag
