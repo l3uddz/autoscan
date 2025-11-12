@@ -12,7 +12,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 
 ENV \
-  PATH="/app/autoscan" \
+  PATH="/app" \
   AUTOSCAN_CONFIG="/config/config.yml" \
   AUTOSCAN_DATABASE="/config/autoscan.db" \
   AUTOSCAN_LOG="/config/activity.log" \
@@ -21,10 +21,10 @@ ENV \
 COPY --from=rootfs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=rootfs /usr/share/zoneinfo /usr/share/zoneinfo
 
-COPY ["dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}/autoscan", "/app/autoscan/autoscan"]
+COPY ["dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}/autoscan", "/app/autoscan"]
 
 VOLUME ["/config"]
 
 EXPOSE 3030
 
-ENTRYPOINT ["/app/autoscan/autoscan"]
+ENTRYPOINT ["/app/autoscan"]
