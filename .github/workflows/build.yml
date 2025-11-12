@@ -48,7 +48,7 @@ jobs:
       - name: go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: 1.25
 
       - name: go info
         run: |
@@ -143,8 +143,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            cloudb0x/autoscan:${{ steps.releasetag.outputs.tag }}
-            cloudb0x/autoscan:latest
+            l3uddz/autoscan:${{ steps.releasetag.outputs.tag }}
+            l3uddz/autoscan:latest
 
       # docker build (branch)
       - name: branch name
@@ -174,7 +174,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            cloudb0x/autoscan:${{ steps.dockertag.outputs.replaced }}
+            l3uddz/autoscan:${{ steps.dockertag.outputs.replaced }}
 
       # cleanup
       - name: cleanup
