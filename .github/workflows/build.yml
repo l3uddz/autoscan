@@ -103,13 +103,13 @@ jobs:
 
       # artifacts
       - name: artifact_linux
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build_linux
           path: dist/*linux*
 
       - name: artifact_darwin
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build_darwin
           path: dist/*darwin*
