@@ -24,8 +24,6 @@ import (
 	"github.com/l3uddz/autoscan/targets/emby"
 	"github.com/l3uddz/autoscan/targets/jellyfin"
 	"github.com/l3uddz/autoscan/targets/plex"
-	"github.com/l3uddz/autoscan/triggers/a_train"
-	"github.com/l3uddz/autoscan/triggers/bernard"
 	"github.com/l3uddz/autoscan/triggers/inotify"
 	"github.com/l3uddz/autoscan/triggers/lidarr"
 	"github.com/l3uddz/autoscan/triggers/manual"
@@ -55,8 +53,6 @@ type config struct {
 	// autoscan.HTTPTrigger
 	Triggers struct {
 		Manual  manual.Config    `yaml:"manual"`
-		ATrain  a_train.Config   `yaml:"a-train"`
-		Bernard []bernard.Config `yaml:"bernard"`
 		Inotify []inotify.Config `yaml:"inotify"`
 		Lidarr  []lidarr.Config  `yaml:"lidarr"`
 		Radarr  []radarr.Config  `yaml:"radarr"`
@@ -221,18 +217,6 @@ func main() {
 	}
 
 	// daemon triggers
-	for _, t := range c.Triggers.Bernard {
-		trigger, err := bernard.New(t, db)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("trigger", "bernard").
-				Msg("Failed initialising trigger")
-		}
-
-		go trigger(proc.Add)
-	}
-
 	for _, t := range c.Triggers.Inotify {
 		trigger, err := inotify.New(t)
 		if err != nil {
@@ -267,7 +251,6 @@ func main() {
 
 	log.Info().
 		Int("manual", 1).
-		Int("bernard", len(c.Triggers.Bernard)).
 		Int("inotify", len(c.Triggers.Inotify)).
 		Int("lidarr", len(c.Triggers.Lidarr)).
 		Int("radarr", len(c.Triggers.Radarr)).
