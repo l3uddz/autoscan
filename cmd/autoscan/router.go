@@ -12,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/l3uddz/autoscan/processor"
-	"github.com/l3uddz/autoscan/triggers/a_train"
 	"github.com/l3uddz/autoscan/triggers/lidarr"
 	"github.com/l3uddz/autoscan/triggers/manual"
 	"github.com/l3uddz/autoscan/triggers/radarr"
@@ -57,16 +56,6 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		if c.Auth.Username != "" && c.Auth.Password != "" {
 			r.Use(middleware.BasicAuth("Autoscan 1.x", createCredentials(c)))
 		}
-
-		// A-Train HTTP-trigger
-		r.Route("/a-train", func(r chi.Router) {
-			trigger, err := a_train.New(c.Triggers.ATrain)
-			if err != nil {
-				log.Fatal().Err(err).Str("trigger", "a-train").Msg("Failed initialising trigger")
-			}
-
-			r.Post("/{drive}", trigger(proc.Add).ServeHTTP)
-		})
 
 		// Mixed-style Manual HTTP-trigger
 		r.Route("/manual", func(r chi.Router) {

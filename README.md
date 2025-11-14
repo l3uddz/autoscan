@@ -1,10 +1,7 @@
-Autoscan, [A-Train](https://github.com/m-rots/a-train) and [Bernard](https://github.com/m-rots/bernard-rs) are no longer actively maintained. All projects are considered feature frozen and when compatibility with Google Drive, Plex, Emby, Jellyfin and the -arrs inevitably breaks, no fixes will be provided and such an event will officially mark these projects as end of life.
-As all three projects have permissible open source licenses, feel free to start a fork and continue development. Ownership of these repositories as well as the Docker images will not be transferred.
-
 # Autoscan
 
 Autoscan replaces the default Plex and Emby behaviour for picking up file changes on the file system.
-Autoscan integrates with Sonarr, Radarr, Readarr, Lidarr and Google Drive to fetch changes in near real-time without relying on the file system.
+Autoscan integrates with Sonarr, Radarr, Readarr and Lidarr.
 
 Wait, what happened to [Plex Autoscan](https://github.com/l3uddz/plex_autoscan)?
 Well, Autoscan is a rewrite of the original Plex Autoscan written in the Go language.
@@ -12,8 +9,6 @@ In addition, this rewrite introduces a more modular approach and should be easy 
 
 ## Comparison to Plex Autoscan
 
-- [A-Train](https://github.com/m-rots/a-train/pkgs/container/a-train), Autoscan's Google Drive integration, only supports Shared Drives and requires Service Account authentication.
-- A-Train does not support RClone Crypt remotes.
 - Autoscan does not rely on manual trash deletion when connected to Plex. Therefore, you should re-enable the `Empty trash automatically after every scan` setting in Plex.
 
 Autoscan also improves upon [Plex Autoscan](https://github.com/l3uddz/plex_autoscan) by adding the following features:
@@ -111,9 +106,6 @@ They translate incoming data into a common data format called the Scan.
 
 Autoscan currently supports the following triggers:
 
-- [A-Train](https://github.com/m-rots/a-train/pkgs/container/a-train): The official Google Drive trigger for Autoscan. \
-  _A-Train is [available separately](https://github.com/m-rots/a-train/pkgs/container/a-train)._
-
 - Inotify: Listens for changes on the file system. \
   **This should not be used on top of RClone mounts.** \
   _Bugs may still exist._
@@ -130,31 +122,6 @@ All triggers support:
 
 - RegExp-based rewriting rules: translate a path given by the trigger to a path on the local file system. \
   _If the paths are identical between the trigger and the local file system, then the `rewrite` field should be ignored._
-
-### A-Train
-
-Autoscan can monitor Google Drive through [A-Train](https://github.com/m-rots/a-train/pkgs/container/a-train). A-Train is a stand-alone tool created by the Autoscan developers and is officially part of the Autoscan project.
-
-The A-Train trigger configuration is not required, as Autoscan automatically listens for A-Train requests. However, to configure global and drive-specific rewrite rules, you could add A-Train to your config:
-
-```yaml
-triggers:
-  a-train:
-    priority: 5
-    rewrite: # Global rewrites
-      - from: ^/Media/
-        to: /mnt/unionfs/Media/
-    # Drives only need to be given when Drive-specific rewrites are used
-    drives:
-      - id: 0A1xxxxxxxxxUk9PVA # The ID of Shared Drive #1
-        rewrite: # Drive-specific rewrite (has priority over global rewrite)
-          - from: ^/TV/
-            to: /mnt/unionfs/TV/
-      - id: 0A2xxxxxxxxxUk9PVA # The ID of Shared Drive #2
-        rewrite: # Drive-specific rewrite (has priority over global rewrite)
-          - from: ^/Movies/
-            to: /mnt/unionfs/Movies/
-```
 
 ### Manual
 
@@ -231,18 +198,6 @@ triggers:
     rewrite:
       - from: ^/Media/
         to: /mnt/unionfs/Media/
-
-  a-train:
-    priority: 5
-    rewrite: # Global rewrites
-      - from: ^/Media/
-        to: /mnt/unionfs/Media/
-    # Drives only need to be given when Drive-specific rewrites are used
-    drives:
-      - id: 0A1xxxxxxxxxUk9PVA # The ID of Shared Drive #1
-        rewrite: # Drive-specific rewrite (has priority over global rewrite)
-          - from: ^/TV/
-            to: /mnt/unionfs/TV/
 
   inotify:
     - priority: 0
@@ -583,28 +538,3 @@ Autoscan's Docker image supports the following parameters.
 |       `-v /config`        | Autoscan's config and database file                                           |
 
 Any other volumes can be referenced within Autoscan's config file `config.yml`, assuming it has been specified as a volume.
-
-#### Cloudbox
-
-The following Docker setup should work for many Cloudbox users.
-
-**WARNING: You still need to configure the `config.yml` file!**
-
-Make sure to replace `DOMAIN.TLD` with your domain and `YOUR_EMAIL` with your email.
-
-```bash
-docker run \
-  --name=autoscan \
-  --user=1000:1001 \
-  -e "VIRTUAL_HOST=autoscan.DOMAIN.TLD" \
-  -e "VIRTUAL_PORT=3030" \
-  -e "LETSENCRYPT_HOST=autoscan.DOMAIN.TLD" \
-  -e "LETSENCRYPT_EMAIL=YOUR_EMAIL" \
-  -v "/opt/autoscan:/config" \
-  -v "/mnt:/mnt:ro" \
-  --label="com.github.cloudbox.cloudbox_managed=true" \
-  --network=cloudbox \
-  --network-alias=autoscan  \
-  --restart=unless-stopped \
-  -d l3uddz/autoscan
-```
