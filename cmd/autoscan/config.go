@@ -4,6 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+)
+
+var (
+	userConfigDirFunc = os.UserConfigDir
+	warnConfigDirOnce sync.Once
 )
 
 func defaultConfigDirectory(app string, filename string) string {
@@ -16,19 +22,24 @@ func defaultConfigDirectory(app string, filename string) string {
 	}
 
 	// config dir
-	ucd, err := os.UserConfigDir()
-	if err != nil {
-		panic(fmt.Sprintf("userconfigdir: %v", err))
-	}
-
-	acd := filepath.Join(ucd, app)
-	if _, err := os.Stat(acd); os.IsNotExist(err) {
-		if err := os.MkdirAll(acd, os.ModePerm); err != nil {
-			panic(fmt.Sprintf("mkdirall: %v", err))
+	ucd, err := userConfigDirFunc()
+	if err == nil && ucd != "" {
+		acd := filepath.Join(ucd, app)
+		mkErr := os.MkdirAll(acd, os.ModePerm)
+		if mkErr == nil {
+			return acd
 		}
+
+		warnConfigDirOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "autoscan: failed ensuring config directory %s: %v\n", acd, mkErr)
+		})
+	} else if err != nil {
+		warnConfigDirOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "autoscan: unable to determine user config directory: %v\n", err)
+		})
 	}
 
-	return acd
+	return bcd
 }
 
 func getBinaryPath() string {
