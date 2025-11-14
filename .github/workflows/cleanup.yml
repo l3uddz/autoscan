@@ -7,18 +7,20 @@ jobs:
     if: startsWith(github.event.ref_type, 'branch') == true
     runs-on: ubuntu-latest
     steps:
-      - name: branch name
-        id: branch-names
-        uses: tj-actions/branch-names@v9
+      - name: docker tag
+        uses: frabert/replace-string-action@v2
+        id: dockertag
         with:
-          replace_slashes_with_hyphens: "true"
-          strip_tag_prefix: "v"
+          pattern: '[:\.\/]+'
+          string: "${{ github.event.ref }}"
+          replace-with: "-"
+          flags: "g"
 
       - name: remove docker tag
         shell: bash
         env:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-          tag: ${{ steps.branch-names.outputs.current_branch }}
+          tag: ${{ steps.dockertag.outputs.replaced }}
         run: |
           docker run --rm lumir/remove-dockerhub-tag --user "$username" --password "$password" l3uddz/autoscan:$tag
