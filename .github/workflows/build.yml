@@ -34,6 +34,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/ui/package-lock.json
 
       - name: node info
         run: |
@@ -81,6 +83,12 @@ jobs:
         with:
           path: .task/**/*
           key: ${{ runner.os }}-go-task
+
+      - name: cache-ui
+        uses: actions/cache@v3
+        with:
+          path: web/ui/dist
+          key: ${{ runner.os }}-ui-${{ hashFiles('web/ui/src/**', 'web/ui/package-lock.json', 'web/ui/vite.config.js') }}
 
       # vendor
       - name: vendor

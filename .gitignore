@@ -1,7 +1,7 @@
 .DS_Store
 .idea/
 vendor/
-dist/
+/dist/
 
 *.db
 *.log
@@ -11,5 +11,7 @@ dist/
 /.task/
 
 # Frontend
+assets/
 web/ui/node_modules/
-web/ui/dist/
+web/ui/dist/*
+!web/ui/dist/.gitkeep
