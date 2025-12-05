@@ -63,6 +63,7 @@ tasks:
   # Go tasks
   test:
     desc: Go tests
+    deps: [ ui:build ]
     cmds:
       - go test ./... -cover -v -race ${GO_PACKAGES}
 
