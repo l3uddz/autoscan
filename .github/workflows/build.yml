@@ -30,6 +30,16 @@ jobs:
       - name: task info
         run: task --version
 
+      - name: node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: node info
+        run: |
+          node --version
+          npm --version
+
       - name: qemu
         if: github.event.pull_request.head.repo.fork == false
         uses: docker/setup-qemu-action@v2

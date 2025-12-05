@@ -30,6 +30,7 @@ import (
 	"github.com/l3uddz/autoscan/triggers/radarr"
 	"github.com/l3uddz/autoscan/triggers/readarr"
 	"github.com/l3uddz/autoscan/triggers/sonarr"
+	"github.com/l3uddz/autoscan/web/api"
 
 	// sqlite3 driver
 	_ "modernc.org/sqlite"
@@ -124,20 +125,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	// logger
-	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out:        os.Stderr,
-	}, zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out: &lumberjack.Logger{
-			Filename:   cli.Log,
-			MaxSize:    5,
-			MaxAge:     14,
-			MaxBackups: 5,
+	// Create log hub for WebSocket streaming
+	logHub := api.NewLogHub()
+
+	// logger with WebSocket streaming support
+	logger := log.Output(io.MultiWriter(
+		zerolog.ConsoleWriter{
+			TimeFormat: time.Stamp,
+			Out:        os.Stderr,
 		},
-		NoColor: true,
-	}))
+		zerolog.ConsoleWriter{
+			TimeFormat: time.Stamp,
+			Out: &lumberjack.Logger{
+				Filename:   cli.Log,
+				MaxSize:    5,
+				MaxAge:     14,
+				MaxBackups: 5,
+			},
+			NoColor: true,
+		},
+		zerolog.ConsoleWriter{
+			TimeFormat: time.Stamp,
+			Out:        logHub,
+			NoColor:    true,
+		},
+	))
 
 	switch {
 	case cli.Verbosity == 1:
@@ -211,6 +223,49 @@ func main() {
 		Strs("anchors", c.Anchors).
 		Msg("Initialised processor")
 
+	// Create rewrite registry for UI
+	rewriteRegistry := api.NewRewriteRegistry()
+
+	// Register trigger rewrites
+	if len(c.Triggers.Manual.Rewrite) > 0 {
+		rewriter, _ := autoscan.NewRewriter(c.Triggers.Manual.Rewrite)
+		rewriteRegistry.AddTrigger("manual", "manual", c.Triggers.Manual.Rewrite, rewriter)
+	}
+	for _, t := range c.Triggers.Lidarr {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTrigger("lidarr", t.Name, t.Rewrite, rewriter)
+	}
+	for _, t := range c.Triggers.Radarr {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTrigger("radarr", t.Name, t.Rewrite, rewriter)
+	}
+	for _, t := range c.Triggers.Readarr {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTrigger("readarr", t.Name, t.Rewrite, rewriter)
+	}
+	for _, t := range c.Triggers.Sonarr {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTrigger("sonarr", t.Name, t.Rewrite, rewriter)
+	}
+
+	// Register target rewrites
+	for _, t := range c.Targets.Autoscan {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTarget("autoscan", t.URL, t.Rewrite, rewriter)
+	}
+	for _, t := range c.Targets.Plex {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTarget("plex", t.URL, t.Rewrite, rewriter)
+	}
+	for _, t := range c.Targets.Emby {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTarget("emby", t.URL, t.Rewrite, rewriter)
+	}
+	for _, t := range c.Targets.Jellyfin {
+		rewriter, _ := autoscan.NewRewriter(t.Rewrite)
+		rewriteRegistry.AddTarget("jellyfin", t.URL, t.Rewrite, rewriter)
+	}
+
 	// Check authentication. If no auth -> warn user.
 	if c.Auth.Username == "" || c.Auth.Password == "" {
 		log.Warn().Msg("Webhooks running without authentication")
@@ -230,7 +285,7 @@ func main() {
 	}
 
 	// http triggers
-	router := getRouter(c, proc)
+	router := getRouter(c, proc, rewriteRegistry, logHub)
 
 	for _, h := range c.Host {
 		go func(host string) {

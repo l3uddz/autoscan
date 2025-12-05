@@ -17,6 +17,8 @@ require (
 	modernc.org/sqlite v1.40.1
 )
 
+require github.com/gorilla/websocket v1.5.3
+
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

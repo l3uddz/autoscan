@@ -1,6 +1,11 @@
 # https://goreleaser.com
 project_name: autoscan
 
+# Ensure frontend is built before Go builds
+before:
+  hooks:
+    - task ui:build
+
 # Build
 builds:
   -

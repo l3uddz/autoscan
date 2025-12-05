@@ -17,6 +17,8 @@ import (
 	"github.com/l3uddz/autoscan/triggers/radarr"
 	"github.com/l3uddz/autoscan/triggers/readarr"
 	"github.com/l3uddz/autoscan/triggers/sonarr"
+	"github.com/l3uddz/autoscan/web"
+	"github.com/l3uddz/autoscan/web/api"
 )
 
 func pattern(name string) string {
@@ -29,7 +31,7 @@ func createCredentials(c config) map[string]string {
 	return creds
 }
 
-func getRouter(c config, proc *processor.Processor) chi.Router {
+func getRouter(c config, proc *processor.Processor, registry *api.RewriteRegistry, logHub *api.LogHub) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -49,6 +51,21 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 
 	// Health check
 	r.Get("/health", healthHandler)
+
+	// API routes
+	r.Route("/api", func(r chi.Router) {
+		// Use Basic Auth middleware if configured
+		if c.Auth.Username != "" && c.Auth.Password != "" {
+			r.Use(middleware.BasicAuth("Autoscan API", createCredentials(c)))
+		}
+
+		apiHandler := api.New(proc, registry, logHub)
+		r.Mount("/", apiHandler.Routes())
+	})
+
+	// Web UI - serve embedded SPA
+	r.Handle("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
+	r.Mount("/ui/", http.StripPrefix("/ui", web.UIHandler()))
 
 	// HTTP-Triggers
 	r.Route("/triggers", func(r chi.Router) {

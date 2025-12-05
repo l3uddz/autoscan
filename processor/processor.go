@@ -56,6 +56,11 @@ func (p *Processor) ScansProcessed() int64 {
 	return atomic.LoadInt64(&p.processed)
 }
 
+// GetAllScans returns all queued scans
+func (p *Processor) GetAllScans() ([]autoscan.Scan, error) {
+	return p.store.GetAll()
+}
+
 // CheckAvailability checks whether all targets are available.
 // If one target is not available, the error will return.
 func (p *Processor) CheckAvailability(targets []autoscan.Target) error {

@@ -9,3 +9,7 @@ dist/
 /config.yml
 
 /.task/
+
+# Frontend
+web/ui/node_modules/
+web/ui/dist/

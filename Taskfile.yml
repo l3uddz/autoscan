@@ -9,6 +9,7 @@ vars:
     sh: go env GOARCH
   DIST_PATH: dist
   BUILD_PATH: "{{.DIST_PATH}}/{{.APP}}_{{.GOOS}}_{{.GOARCH}}"
+  UI_PATH: web/ui
 
 env:
   GIT_COMMIT:
@@ -17,6 +18,49 @@ env:
   VERSION: 0.0.0-dev
 
 tasks:
+  # Frontend tasks
+  ui:install:
+    desc: Install frontend dependencies
+    dir: '{{.UI_PATH}}'
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+    cmds:
+      - npm ci
+    status:
+      - test -d node_modules
+
+  ui:build:
+    desc: Build frontend for production
+    dir: '{{.UI_PATH}}'
+    deps: [ ui:install ]
+    sources:
+      - src/**/*
+      - public/**/*
+      - index.html
+      - vite.config.js
+      - svelte.config.js
+      - package.json
+    generates:
+      - dist/**/*
+    cmds:
+      - npm run build
+
+  ui:dev:
+    desc: Start frontend development server
+    dir: '{{.UI_PATH}}'
+    deps: [ ui:install ]
+    cmds:
+      - npm run dev
+
+  ui:clean:
+    desc: Clean frontend build artifacts
+    cmds:
+      - rm -rf {{.UI_PATH}}/dist
+
+  # Go tasks
   test:
     desc: Go tests
     cmds:
@@ -40,9 +84,9 @@ tasks:
   build:
     desc: Generate a development binary
     dir: '{{.BUILD_PATH}}'
-    deps: [ vendor ]
+    deps: [ vendor, ui:build ]
     cmds:
-      - | 
+      - |
         CGO_ENABLED={{.CGO_ENABLED}} \
         go build \
         -mod vendor \
@@ -52,15 +96,26 @@ tasks:
 
   release:
     desc: Generate a release, but don't publish
+    deps: [ ui:build ]
     cmds:
       - goreleaser --skip-validate --skip-publish --rm-dist
 
   snapshot:
     desc: Generate a snapshot release
+    deps: [ ui:build ]
     cmds:
       - goreleaser --snapshot --skip-publish --rm-dist
 
   publish:
     desc: Generate a release, and publish
+    deps: [ ui:build ]
     cmds:
       - goreleaser --rm-dist
+
+  clean:
+    desc: Clean all build artifacts
+    cmds:
+      - rm -rf {{.DIST_PATH}}
+      - rm -rf {{.UI_PATH}}/dist
+      - rm -rf {{.UI_PATH}}/node_modules
+      - rm -rf .task
