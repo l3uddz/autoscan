@@ -324,4 +324,26 @@
     font-family: monospace;
     color: var(--text-primary);
   }
+
+  @media (max-width: 768px) {
+    .rewrite-tester {
+      padding: 1rem;
+    }
+
+    .rewrite-tester h2 {
+      font-size: 1.25rem;
+    }
+
+    .selectors {
+      grid-template-columns: 1fr;
+    }
+
+    .step {
+      padding: 0.75rem;
+    }
+
+    .step-path {
+      font-size: 0.8125rem;
+    }
+  }
 </style>

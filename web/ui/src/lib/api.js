@@ -1,3 +1,5 @@
+import { isAuthenticated, authRequired, authError } from './stores.js';
+
 const API_BASE = '/api';
 
 function getAuthHeaders() {
@@ -19,6 +21,7 @@ async function request(endpoint, options = {}) {
   });
 
   if (response.status === 401) {
+    isAuthenticated.set(false);
     throw new Error('Unauthorized');
   }
 
@@ -26,7 +29,53 @@ async function request(endpoint, options = {}) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }
 
+  isAuthenticated.set(true);
   return response;
+}
+
+export async function getAuthStatus() {
+  try {
+    const response = await fetch(`${API_BASE}/auth/status`);
+    const data = await response.json();
+    return data.auth_required;
+  } catch {
+    // If we can't reach the endpoint, assume auth is required for safety
+    return true;
+  }
+}
+
+export async function checkAuth() {
+  // First check if auth is required by the server
+  const isAuthRequired = await getAuthStatus();
+  authRequired.set(isAuthRequired);
+
+  if (!isAuthRequired) {
+    // No auth configured on server - allow access
+    isAuthenticated.set(true);
+    return true;
+  }
+
+  // Auth is required - check if we have credentials stored
+  if (!hasCredentials()) {
+    isAuthenticated.set(false);
+    return false;
+  }
+
+  // Verify stored credentials are valid
+  try {
+    await request('/config');
+    isAuthenticated.set(true);
+    authError.set(null);
+    return true;
+  } catch (err) {
+    if (err.message === 'Unauthorized') {
+      isAuthenticated.set(false);
+      return false;
+    }
+    // Network error or server issue - assume auth is OK if we have credentials
+    isAuthenticated.set(true);
+    return true;
+  }
 }
 
 export async function getScans() {
@@ -63,10 +112,12 @@ export async function testRewrite(path, triggerKind, triggerName, targetKind, ta
 export function setCredentials(username, password) {
   const encoded = btoa(`${username}:${password}`);
   localStorage.setItem('autoscan_credentials', encoded);
+  authError.set(null);
 }
 
 export function clearCredentials() {
   localStorage.removeItem('autoscan_credentials');
+  isAuthenticated.set(false);
 }
 
 export function hasCredentials() {

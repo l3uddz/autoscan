@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -54,13 +55,22 @@ func getRouter(c config, proc *processor.Processor, registry *api.RewriteRegistr
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
-		// Use Basic Auth middleware if configured
-		if c.Auth.Username != "" && c.Auth.Password != "" {
-			r.Use(middleware.BasicAuth("Autoscan API", createCredentials(c)))
-		}
+		// Auth status endpoint - no auth required
+		authRequired := c.Auth.Username != "" && c.Auth.Password != ""
+		r.Get("/auth/status", func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"auth_required": authRequired})
+		})
 
-		apiHandler := api.New(proc, registry, logHub)
-		r.Mount("/", apiHandler.Routes())
+		// Protected routes
+		r.Group(func(r chi.Router) {
+			if authRequired {
+				r.Use(middleware.BasicAuth("Autoscan API", createCredentials(c)))
+			}
+
+			apiHandler := api.New(proc, registry, logHub)
+			r.Mount("/", apiHandler.Routes())
+		})
 	})
 
 	// Web UI - serve embedded SPA

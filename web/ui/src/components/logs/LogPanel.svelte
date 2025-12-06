@@ -137,12 +137,14 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
+    gap: 1rem;
   }
 
   .controls {
     display: flex;
     gap: 1rem;
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .auto-scroll {
@@ -162,7 +164,7 @@
     overflow-y: auto;
     font-family: monospace;
     font-size: 0.8125rem;
-    min-height: 400px;
+    min-height: 300px;
     max-height: calc(100vh - 150px);
   }
 
@@ -210,5 +212,49 @@
     color: var(--text-muted);
     text-align: center;
     padding: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .log-panel {
+      padding: 1rem;
+    }
+
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .header h2 {
+      font-size: 1.25rem;
+    }
+
+    .controls {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .log-container {
+      min-height: 200px;
+      max-height: calc(100vh - 200px);
+      font-size: 0.75rem;
+    }
+
+    .log-entry {
+      flex-wrap: wrap;
+      gap: 0.25rem;
+    }
+
+    .time {
+      font-size: 0.7rem;
+    }
+
+    .level {
+      width: auto;
+    }
+
+    .message {
+      width: 100%;
+      margin-top: 0.25rem;
+    }
   }
 </style>

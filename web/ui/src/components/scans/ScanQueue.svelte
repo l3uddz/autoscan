@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { scans, scansLoading, scansError } from '../../lib/stores.js';
+  import { scans, scansLoading, scansError, isAuthenticated } from '../../lib/stores.js';
   import { getScans, addScan } from '../../lib/api.js';
   import { formatRelativeTime } from '../../lib/utils.js';
 
@@ -29,7 +29,7 @@
   }
 
   function toggleAutoRefresh() {
-    autoRefresh = !autoRefresh;
+    // autoRefresh is already toggled by bind:checked
     if (autoRefresh) {
       startAutoRefresh();
     } else {
@@ -38,12 +38,14 @@
   }
 
   function startAutoRefresh() {
+    stopAutoRefresh();
     refreshInterval = setInterval(loadScans, REFRESH_INTERVAL);
   }
 
   function stopAutoRefresh() {
     if (refreshInterval) {
       clearInterval(refreshInterval);
+      refreshInterval = null;
     }
   }
 
@@ -70,15 +72,22 @@
     }
   }
 
+  // Subscribe to auth state to pause/resume auto-refresh
+  const unsubAuth = isAuthenticated.subscribe(authenticated => {
+    if (authenticated === true && autoRefresh) {
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+  });
+
   onMount(() => {
     loadScans();
-    if (autoRefresh) {
-      startAutoRefresh();
-    }
   });
 
   onDestroy(() => {
     stopAutoRefresh();
+    unsubAuth();
   });
 </script>
 
@@ -171,12 +180,14 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
+    gap: 1rem;
   }
 
   .controls {
     display: flex;
     gap: 1rem;
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .count {
@@ -221,6 +232,7 @@
 
   .priority-group {
     width: 100px;
+    flex-shrink: 0;
   }
 
   .message {
@@ -274,6 +286,7 @@
     gap: 1rem;
     align-items: center;
     font-size: 0.75rem;
+    flex-wrap: wrap;
   }
 
   .meta .badge {
@@ -293,5 +306,38 @@
     color: var(--text-secondary);
     text-align: center;
     padding: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .scan-queue {
+      padding: 1rem;
+    }
+
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .header h2 {
+      font-size: 1.25rem;
+    }
+
+    .controls {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .form-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .priority-group {
+      width: 100%;
+    }
+
+    .form-row .btn {
+      width: 100%;
+    }
   }
 </style>

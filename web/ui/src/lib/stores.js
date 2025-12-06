@@ -1,5 +1,10 @@
 import { writable, derived } from 'svelte/store';
 
+// Auth state: null = checking, true = authenticated, false = needs login
+export const isAuthenticated = writable(null);
+export const authRequired = writable(true);
+export const authError = writable(null);
+
 // Scans store
 export const scans = writable([]);
 export const scansLoading = writable(false);
