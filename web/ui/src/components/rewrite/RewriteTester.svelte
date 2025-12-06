@@ -27,8 +27,8 @@
     result = null;
 
     try {
-      const [triggerKind, triggerName] = selectedTrigger ? selectedTrigger.split(':') : ['', ''];
-      const [targetKind, targetName] = selectedTarget ? selectedTarget.split(':') : ['', ''];
+      const [triggerKind, triggerName] = selectedTrigger ? selectedTrigger.split('|') : ['', ''];
+      const [targetKind, targetName] = selectedTarget ? selectedTarget.split('|') : ['', ''];
 
       result = await testRewrite(
         testPath.trim(),
@@ -45,12 +45,12 @@
   }
 
   $: triggerOptions = ($config.triggers || []).map(t => ({
-    value: `${t.type}:${t.name}`,
+    value: `${t.type}|${t.name}`,
     label: `${t.type} - ${t.name}`
   }));
 
   $: targetOptions = ($config.targets || []).map(t => ({
-    value: `${t.type}:${t.name}`,
+    value: `${t.type}|${t.name}`,
     label: `${t.type} - ${t.name}`
   }));
 </script>
