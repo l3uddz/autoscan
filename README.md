@@ -388,7 +388,8 @@ targets:
 
 - URL. The URL can link to the docker container directly, the localhost or a reverse proxy sitting in front of Jellyfin.
 - Token. We need a Jellyfin API Token to make requests on your behalf. To create one, open the Jellyfin dashboard, go to API Keys, and add a key. \
-  Autoscan sends the token in the `Authorization: MediaBrowser Token="<token>"` header. Jellyfin 10.8 and later accept this header. Newer Jellyfin releases reject the legacy `X-Emby-Token` header by default.
+  Autoscan sends the token in the `Authorization: MediaBrowser Token="<token>"` header. Jellyfin 10.8 and later accept this header. Newer Jellyfin releases reject the legacy `X-Emby-Token` header by default. \
+  If the URL contains `user:password@` for a reverse proxy with Basic authentication, autoscan uses the `Authorization` header for the proxy. In that case, autoscan sends the token in the `ApiKey` query parameter. Autoscan removes the token from its logs.
 - Rewrite. If Jellyfin is not running on the host OS, but in a Docker container (or Autoscan is running in a Docker container), then you need to rewrite paths accordingly. Check out our [rewriting section](#rewriting-paths) for more info.
 
 ### Autoscan

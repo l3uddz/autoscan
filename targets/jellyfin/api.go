@@ -3,8 +3,10 @@ package jellyfin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/rs/zerolog"
 
@@ -29,11 +31,22 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 
 func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	// Jellyfin disables the legacy X-Emby-Token header by default.
-	req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s"`, c.token))
+	if req.URL.User != nil {
+		// The Authorization header carries Basic auth for a reverse proxy.
+		q := req.URL.Query()
+		q.Set(apiKeyParam, c.token)
+		req.URL.RawQuery = q.Encode()
+	} else {
+		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s"`, c.token))
+	}
 	req.Header.Set("Accept", "application/json") // Force JSON Response.
 
 	res, err := c.client.Do(req)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			urlErr.URL = redactURL(req.URL)
+		}
 		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
 	}
 
@@ -42,7 +55,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	}
 
 	c.log.Trace().
-		Stringer("request_url", res.Request.URL).
+		Str("request_url", redactURL(res.Request.URL)).
 		Int("response_status", res.StatusCode).
 		Msg("Request failed")
 
@@ -57,6 +70,18 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	default:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
 	}
+}
+
+// apiKeyParam is the query parameter that Jellyfin reads the token from.
+const apiKeyParam = "ApiKey"
+
+// redactURL returns u without the token and the user password.
+func redactURL(u *url.URL) string {
+	r := *u
+	q := r.Query()
+	q.Del(apiKeyParam)
+	r.RawQuery = q.Encode()
+	return r.Redacted()
 }
 
 func (c apiClient) Available() error {
