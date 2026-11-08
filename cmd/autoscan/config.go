@@ -1,10 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -53,4 +58,32 @@ func getBinaryPath() string {
 	}
 
 	return dir
+}
+
+// waitForConfig opens the config file at path. If the file is missing or
+// empty, it checks again after each interval until the file has content.
+// A container can then start before the user creates config.yml.
+func waitForConfig(path string, interval time.Duration) (*os.File, error) {
+	waited := false
+	for {
+		info, err := os.Stat(path)
+		switch {
+		case err == nil && info.Size() > 0:
+			if waited {
+				log.Info().Str("path", path).Msg("Found config")
+			}
+			return os.Open(path)
+		case err != nil && !errors.Is(err, fs.ErrNotExist):
+			return nil, err
+		}
+
+		if !waited {
+			log.Warn().
+				Str("path", path).
+				Dur("interval", interval).
+				Msg("Config is missing or empty, waiting for it")
+			waited = true
+		}
+		time.Sleep(interval)
+	}
 }
