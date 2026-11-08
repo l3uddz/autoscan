@@ -1,0 +1,5 @@
+# codebase-memory index exclusions (gitignore syntax).
+
+# Trigger tests use these fixtures for deliberately invalid JSON payloads.
+# The indexer cannot parse them and reports false coverage gaps.
+triggers/*/testdata/invalid.json
