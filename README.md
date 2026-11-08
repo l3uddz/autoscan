@@ -582,3 +582,43 @@ The Autoscan Docker image supports these parameters.
 
 The Autoscan configuration file `config.yml` can refer to other volumes.
 You must also mount each of these volumes in the container.
+
+If `/config/config.yml` is missing or empty, Autoscan waits for it and does not stop.
+You can start the container first and then create the file.
+
+### Unraid
+
+This repository has an Unraid container template in [`unraid/autoscan.xml`](unraid/autoscan.xml).
+The template sets the image, port 3030, the `/config` folder, a read-only `/media` folder, and the log verbosity.
+
+The image has no PUID or PGID variables.
+The template runs Autoscan as user 99 and group 100 (`nobody:users`) with `--user=99:100` in Extra Parameters.
+
+To install Autoscan from the template, do these steps:
+
+1. Open a terminal on the Unraid server.
+2. Download the template:
+
+   ```bash
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-autoscan.xml \
+     https://raw.githubusercontent.com/l3uddz/autoscan/master/unraid/autoscan.xml
+   ```
+
+3. Create the configuration folder and give it to user 99 and group 100:
+
+   ```bash
+   mkdir -p /mnt/user/appdata/autoscan
+   chown 99:100 /mnt/user/appdata/autoscan
+   ```
+
+4. Create `/mnt/user/appdata/autoscan/config.yml`. Start from the [full config file](#full-config-file) example. Configure at least one target, because the processor stops if no target exists. Change the example paths, such as `/mnt/unionfs/Media/`, to `/media` paths.
+5. In the Unraid web interface, go to Docker and select Add Container.
+6. In the Template list, select `autoscan`.
+7. Change the Media path to the share that holds your media, then select Apply.
+
+You can also do step 4 after you start the container.
+Until `config.yml` exists and has content, Autoscan logs `Config is missing or empty, waiting for it` and checks again every 5 seconds.
+When the file has content, Autoscan starts.
+
+In `config.yml`, use the paths inside the Autoscan container, for example `/media/TV`.
+If Sonarr, Plex, or another container sees a different path for the same files, add [rewrite rules](#rewriting-paths).

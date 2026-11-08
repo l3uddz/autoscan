@@ -158,7 +158,7 @@ func main() {
 	db.SetMaxOpenConns(1)
 
 	// config
-	file, err := os.Open(cli.Config)
+	file, err := waitForConfig(cli.Config, 5*time.Second)
 	if err != nil {
 		log.Fatal().
 			Err(err).
