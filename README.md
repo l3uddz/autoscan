@@ -53,7 +53,8 @@ Triggers, targets, and the processor can each see a file at a different path.
 For example, some of them run in Docker containers and others run on the host operating system (OS).
 
 Rewrite rules solve this problem.
-A rewrite rule translates a path from the view of a trigger or a target to the view of the processor.
+A trigger rule translates a path from the view of the trigger to the view of Autoscan.
+A target rule translates a path from the view of Autoscan to the view of the target.
 
 Before you begin, make sure that you understand regular expressions. \
 Also make sure that you understand capture groups, because the `to` field uses them.
@@ -110,11 +111,12 @@ targets:
 
 This is the journey of the path `/tv/Westworld/Season 1/s01e01.mkv` from Sonarr:
 
-1. Autoscan translates the Sonarr path to a path that is local to Autoscan. \
-   `/mnt/unionfs/Media/TV/Westworld/Season 1/s01e01.mkv`
-2. Autoscan adds the path to its datastore.
-3. Autoscan translates its own path to a path that is local to Plex. \
-   `/data/TV/Westworld/Season 1/s01e01.mkv`
+1. The Sonarr trigger takes the folder of the file, `/tv/Westworld/Season 1`.
+2. The trigger translates the folder to a path that is local to Autoscan. \
+   `/mnt/unionfs/Media/TV/Westworld/Season 1`
+3. Autoscan adds the folder to its datastore.
+4. Autoscan translates its own path to a path that is local to Plex. \
+   `/data/TV/Westworld/Season 1`
 
 ## Triggers
 
