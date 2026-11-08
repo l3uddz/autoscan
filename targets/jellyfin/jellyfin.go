@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -29,7 +30,7 @@ type target struct {
 func New(c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "jellyfin").
-		Str("url", c.URL).
+		Str("url", redactConfigURL(c.URL)).
 		Logger()
 
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
@@ -100,4 +101,14 @@ func (t target) getScanLibrary(folder string) (*library, error) {
 	}
 
 	return nil, fmt.Errorf("%v: failed determining library", folder)
+}
+
+// redactConfigURL returns the configured URL without the user password.
+func redactConfigURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid url"
+	}
+
+	return redactURL(u)
 }

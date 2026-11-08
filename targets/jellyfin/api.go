@@ -33,6 +33,8 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	// Jellyfin disables the legacy X-Emby-Token header by default.
 	if req.URL.User != nil {
 		// The Authorization header carries Basic auth for a reverse proxy.
+		// The token is then in the URL. redactURL removes it from autoscan
+		// logs, but the proxy access log can still contain it.
 		q := req.URL.Query()
 		q.Set(apiKeyParam, c.token)
 		req.URL.RawQuery = q.Encode()
