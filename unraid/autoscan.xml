@@ -25,7 +25,9 @@
   <Requires>Create config.yml in the Config folder. Until this file exists and has content, Autoscan waits and does not start. The README has an example configuration.</Requires>
   <Description>Autoscan receives file change events from Sonarr, Radarr, Lidarr, Readarr, and other sources. It then asks Plex, Emby, or Jellyfin to scan only the folders that changed, instead of the full library.
 
-Create /mnt/user/appdata/autoscan/config.yml. Until this file exists and has content, Autoscan waits and checks for it every 5 seconds. Then it starts. The README shows an example configuration: https://github.com/l3uddz/autoscan#configuration
+Create /mnt/user/appdata/autoscan/config.yml. Until this file exists and has content, Autoscan waits and checks for it every 5 seconds. Then it starts. Start from the full example in the README: https://github.com/l3uddz/autoscan#full-config-file
+
+Configure at least one target, such as Plex, Emby, or Jellyfin. If no target exists, Autoscan accepts webhooks but does not process scans. Change the example paths, such as /mnt/unionfs/Media/, to /media paths.
 
 The container runs as user 99 and group 100 (nobody:users). Make sure that this user can read and write the Config folder. To use a different user, change --user in Extra Parameters.
 

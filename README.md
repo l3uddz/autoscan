@@ -611,7 +611,7 @@ To install Autoscan from the template, do these steps:
    chown 99:100 /mnt/user/appdata/autoscan
    ```
 
-4. Create `/mnt/user/appdata/autoscan/config.yml`. For an example, read the [configuration section](#configuration).
+4. Create `/mnt/user/appdata/autoscan/config.yml`. Start from the [full config file](#full-config-file) example. Configure at least one target, because the processor stops if no target exists. Change the example paths, such as `/mnt/unionfs/Media/`, to `/media` paths.
 5. In the Unraid web interface, go to Docker and select Add Container.
 6. In the Template list, select `autoscan`.
 7. Change the Media path to the share that holds your media, then select Apply.
