@@ -22,6 +22,20 @@ tasks:
     cmds:
       - go test ./... -cover -v -race ${GO_PACKAGES}
 
+  lint:
+    desc: Go format and vet checks
+    cmds:
+      # gofmt -l exits 0 even when it lists files, so fail on any output.
+      # Only tracked files are checked, because vendor/ is not gofmt clean.
+      - |
+        unformatted="$(gofmt -l $(git ls-files '*.go'))"
+        if [ -n "$unformatted" ]; then
+          echo "gofmt needed for:"
+          echo "$unformatted"
+          exit 1
+        fi
+      - go vet ./...
+
   vendor:
     desc: Go vendor
     sources:
