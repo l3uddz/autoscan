@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>autoscan</Name>
+  <Repository>l3uddz/autoscan:latest</Repository>
+  <Registry>https://hub.docker.com/r/l3uddz/autoscan</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/l3uddz/autoscan/issues</Support>
+  <Project>https://github.com/l3uddz/autoscan</Project>
+  <Overview>Autoscan receives file change events from Sonarr, Radarr, Lidarr, Readarr, and other sources. It then asks Plex, Emby, or Jellyfin to scan only the folders that changed, instead of the full library.</Overview>
+  <Category>MediaApp:Other Tools:Utilities</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/l3uddz/autoscan/master/unraid/autoscan.xml</TemplateURL>
+  <Icon/>
+  <ExtraParams>--user=99:100</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <GitHub>https://github.com/l3uddz/autoscan</GitHub>
+  <ReadMe>https://github.com/l3uddz/autoscan#readme</ReadMe>
+  <ExtraSearchTerms>sonarr radarr lidarr readarr plex emby jellyfin scan webhook arr</ExtraSearchTerms>
+  <License>MIT</License>
+  <Requires>Create config.yml in the Config folder before you start the container. Autoscan stops at start if this file does not exist. The README has an example configuration.</Requires>
+  <Description>Autoscan receives file change events from Sonarr, Radarr, Lidarr, Readarr, and other sources. It then asks Plex, Emby, or Jellyfin to scan only the folders that changed, instead of the full library.
+
+Before the first start, create /mnt/user/appdata/autoscan/config.yml. Autoscan stops at start if this file does not exist. The README shows an example configuration: https://github.com/l3uddz/autoscan#configuration
+
+The container runs as user 99 and group 100 (nobody:users). Make sure that this user can read and write the Config folder. To use a different user, change --user in Extra Parameters.
+
+Autoscan has no web interface. Point the Sonarr, Radarr, Lidarr, or Readarr webhook at http://&lt;UNRAID_IP&gt;:3030/triggers/&lt;trigger_name&gt;. Set authentication in config.yml.
+
+The paths in config.yml are the paths inside this container. If Sonarr, Plex, or another container sees a different path for the same files, add rewrite rules in config.yml.</Description>
+  <Networking>
+    <Mode>bridge</Mode>
+    <Publish>
+      <Port>
+        <HostPort>3030</HostPort>
+        <ContainerPort>3030</ContainerPort>
+        <Protocol>tcp</Protocol>
+      </Port>
+    </Publish>
+  </Networking>
+  <Data>
+    <Volume>
+      <HostDir>/mnt/user/appdata/autoscan</HostDir>
+      <ContainerDir>/config</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+    <Volume>
+      <HostDir>/mnt/user/media</HostDir>
+      <ContainerDir>/media</ContainerDir>
+      <Mode>ro</Mode>
+    </Volume>
+  </Data>
+  <Environment>
+    <Variable>
+      <Value>0</Value>
+      <Name>AUTOSCAN_VERBOSITY</Name>
+      <Mode/>
+    </Variable>
+  </Environment>
+  <Config Name="Webhook port" Target="3030" Default="3030" Mode="tcp" Description="Port for the trigger webhooks. Keep the container port the same as port in config.yml." Type="Port" Display="always" Required="true" Mask="false">3030</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/autoscan" Mode="rw" Description="Holds config.yml, the autoscan.db database, and activity.log. Create config.yml here before the first start." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/autoscan</Config>
+  <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="ro" Description="Read-only mount of your media. Autoscan needs it for anchor files and the inotify trigger. Use /media paths in config.yml, or rewrite the paths that your triggers and targets use." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="Log verbosity" Target="AUTOSCAN_VERBOSITY" Default="0|1|2" Mode="" Description="0 = info, 1 = debug, 2 = trace" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+</Container>
