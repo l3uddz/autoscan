@@ -1,42 +1,47 @@
 # Autoscan
 
-Autoscan replaces the default Plex and Emby behaviour for picking up file changes on the file system.
-Autoscan integrates with Sonarr, Radarr, Readarr and Lidarr.
+Autoscan replaces the default behavior of Plex and Emby for picking up file changes on the file system.
+Autoscan integrates with Sonarr, Radarr, Readarr, and Lidarr.
 
-Wait, what happened to [Plex Autoscan](https://github.com/l3uddz/plex_autoscan)?
-Well, Autoscan is a rewrite of the original Plex Autoscan written in the Go language.
-In addition, this rewrite introduces a more modular approach and should be easy to extend in the future.
+Autoscan is a rewrite of the original [Plex Autoscan](https://github.com/l3uddz/plex_autoscan) in the Go language.
+The rewrite has a more modular design that is easy to extend.
 
 ## Comparison to Plex Autoscan
 
-- Autoscan does not rely on manual trash deletion when connected to Plex. Therefore, you should re-enable the `Empty trash automatically after every scan` setting in Plex.
+Autoscan does not rely on manual trash deletion in Plex.
+Thus, turn the `Empty trash automatically after every scan` setting in Plex back on.
 
-Autoscan also improves upon [Plex Autoscan](https://github.com/l3uddz/plex_autoscan) by adding the following features:
+Autoscan also adds these features to [Plex Autoscan](https://github.com/l3uddz/plex_autoscan):
 
 - Autoscan supports Plex music libraries.
-- Autoscan adds additional support for Emby and Jellyfin.
-- Autoscan can send _scans_ to multiple Plex, Emby and Jellyfin servers.
+- Autoscan supports Emby and Jellyfin.
+- Autoscan can send _scans_ to multiple Plex, Emby, and Jellyfin servers.
 
 ## Installing autoscan
 
-Autoscan offers [pre-compiled binaries](https://github.com/l3uddz/autoscan/releases/latest) for both Linux and MacOS for each official release. In addition, we also offer a [Docker image](#docker)!
+Each official release has [pre-compiled binaries](https://github.com/l3uddz/autoscan/releases/latest) for Linux and macOS.
+A [Docker image](#docker) is also available.
 
-Alternatively, you can build the Autoscan binary yourself.
-To build the autoscan CLI on your system, make sure:
+You can also build the Autoscan binary yourself.
+Before you build it, make sure that your machine runs Linux, macOS, or WSL2.
+Also make sure that [Go](https://golang.org/doc/install) 1.26 or later is installed.
 
-1. Your machine runs Linux, macOS or WSL2
-2. You have [Go](https://golang.org/doc/install) installed (1.26 or later)
-3. Clone this repository and cd into it from the terminal
-4. Run `go build -o autoscan ./cmd/autoscan` from the terminal
+To build the binary, do these steps in a terminal:
 
-You should now have a binary with the name `autoscan` in the root directory of the project.
-To start autoscan, simply run `./autoscan`. If you want autoscan to be globally available, move it to `/bin` or `/usr/local/bin`.
+1. Clone this repository.
+2. Go to the root directory of the repository.
+3. Run `go build -o autoscan ./cmd/autoscan`.
 
-If you need to debug certain Autoscan behaviour, either add the `-v` flag for debug mode or the `-vv` flag for trace mode to get even more details about internal behaviour.
+The build makes a binary with the name `autoscan` in the root directory of the project.
+To start Autoscan, run `./autoscan`.
+To make Autoscan available from all directories, move the binary to `/bin` or `/usr/local/bin`.
+
+To debug Autoscan, add the `-v` flag for debug mode.
+For more detail about the internal behavior, add the `-vv` flag for trace mode.
 
 ## Overview
 
-Autoscan is split into three distinct modules:
+Autoscan has three modules:
 
 - Triggers
 - Processor
@@ -44,26 +49,40 @@ Autoscan is split into three distinct modules:
 
 ### Rewriting paths
 
-Triggers, targets and the processor all live in different contexts. Some are used in Docker containers, others run on host OS, it can be a big mess!
+Triggers, targets, and the processor can each see a file at a different path.
+For example, some of them run in Docker containers and others run on the host operating system (OS).
 
-That's where rewrite rules come into play. They allow you to translate paths between a trigger's / target's perspective and the processor's perspective.
+Rewrite rules solve this problem.
+A rewrite rule translates a path from the view of a trigger or a target to the view of the processor.
 
-**Before you begin, make sure you understand how regular expressions work!** \
-Make sure you know how capture groups work, as these are used for the `to` field.
+Before you begin, make sure that you understand regular expressions. \
+Also make sure that you understand capture groups, because the `to` field uses them.
 
-Triggers can receive paths from any source: A remote server, a Docker container and the local file system. The `rewrite` field can be defined for each individual trigger. This field can contain multiple rewriting rules. Therefore, each rule should have a `-` to indicate the next rule on the list. The `from` should be a regexp pattern describing the path from the trigger's perspective. The `to` should then convert this path into a path which is local to Autoscan.
+Triggers can receive paths from any source, for example a remote server, a Docker container, or the local file system.
+You can set the `rewrite` field for each trigger.
+This field can contain multiple rules.
+Start each rule with a `-`.
+The `from` field is a regular expression (regexp) that matches the path as the trigger sees it.
+The `to` field converts that path into a path that is local to Autoscan.
 
-Targets work the other way around. They have to convert the path local to Autoscan to a path understood by the target, which can be a Docker container, remote server, etc. The `from` should be a regexp pattern describing the path from Autoscan's perspective. The `to` should then convert this path into a path which is local to the target.
+Targets work the other way around.
+A target converts the path that is local to Autoscan into a path that the target understands.
+The target can be a Docker container, a remote server, or a different system.
+The `from` field is a regexp that matches the path as Autoscan sees it.
+The `to` field converts that path into a path that is local to the target.
 
-It is important that all three modules can have access to a file. When a trigger receives a scan, then the file should be available from both the processor and all targets.
+All three modules must have access to each file.
+A file from a trigger must be available to the processor and to all targets.
 
 #### Simple example
 
-- Sonarr running in a Docker container (same example works for Lidarr, Radarr and Readarr)
-- Autoscan running on the host OS (not in a container)
-- Plex running in a Docker container
+This example uses this setup:
 
-The following config only defines rewrite paths, this should not be used directly!
+- Sonarr runs in a Docker container. The same example works for Lidarr, Radarr, and Readarr.
+- Autoscan runs on the host OS, not in a container.
+- Plex runs in a Docker container.
+
+The configuration below only defines rewrite rules. Do not use it as it is.
 
 ```yaml
 triggers:
@@ -89,51 +108,54 @@ targets:
           to: /data/
 ```
 
-Let's take a look at the journey of the path `/tv/Westworld/Season 1/s01e01.mkv` coming from Sonarr.
+This is the journey of the path `/tv/Westworld/Season 1/s01e01.mkv` from Sonarr:
 
-1. Sonarr's path is translated to a path local to Autoscan. \
+1. Autoscan translates the Sonarr path to a path that is local to Autoscan. \
    `/mnt/unionfs/Media/TV/Westworld/Season 1/s01e01.mkv`
-2. The path is accessed by Autoscan to check whether it exists and adds it to the datastore.
-3. Autoscan's path is translated to a path local to Plex. \
-   `/data/TV/Season 1/s01e01.mkv`
-
-This should be all that's needed to get you going. Good luck!
+2. Autoscan adds the path to its datastore.
+3. Autoscan translates its own path to a path that is local to Plex. \
+   `/data/TV/Westworld/Season 1/s01e01.mkv`
 
 ## Triggers
 
-Triggers are the 'input' of Autoscan.
-They translate incoming data into a common data format called the Scan.
+Triggers are the input of Autoscan.
+They translate incoming data into a common data format, the Scan.
+A Scan is a folder path with a priority.
 
-Autoscan currently supports the following triggers:
+Autoscan supports these triggers:
 
-- Inotify: Listens for changes on the file system. \
-  **This should not be used on top of RClone mounts.** \
-  _Bugs may still exist._
+- Inotify: This trigger listens for changes on the file system. \
+  Do not use this trigger on top of RClone mounts. \
+  _This trigger can still contain bugs._
 
-- Manual: When you want to scan a path manually.
+- Manual: This trigger scans a path that you send to it.
 
-- The -arrs: Lidarr, Sonarr, Radarr and Readarr. \
-  Webhook support for Lidarr, Sonarr, Radarr and Readarr.
+- The -arrs: Lidarr, Sonarr, Radarr, and Readarr. \
+  These triggers receive webhooks from Lidarr, Sonarr, Radarr, and Readarr.
 
-All triggers support:
+All triggers support these features:
 
-- Trigger-wide priority: higher priorities are processed sooner. \
-  _Defaults to 0._
+- Trigger-wide priority: The processor processes higher priorities sooner. \
+  _The default priority is 0._
 
-- RegExp-based rewriting rules: translate a path given by the trigger to a path on the local file system. \
-  _If the paths are identical between the trigger and the local file system, then the `rewrite` field should be ignored._
+- Rewrite rules based on regular expressions: These rules translate a path from the trigger to a path on the local file system. \
+  _The paths can be identical on the trigger and on the local file system. In that case, you do not need the `rewrite` field._
 
 ### Manual
 
-**Note: You can visit `/triggers/manual` within a browser to manually submit requests**
+You can open `/triggers/manual` in a browser to submit requests manually.
 
-Autoscan also supports a `manual` webhook for custom scripts or for software which is not supported by Autoscan directly. The manual endpoint is available at `/triggers/manual`.
+Autoscan also has a `manual` webhook for custom scripts and for software that Autoscan does not support directly.
+The manual endpoint is at `/triggers/manual`.
 
-The manual endpoint accepts one or multiple directory paths as input and should be given one or multiple `dir` query parameters. Just like the other webhooks, the manual webhook is protected with basic authentication if the `auth` option is set in the config file of the user.
+The manual endpoint accepts one or more directory paths.
+Give each path in a `dir` query parameter.
+If the configuration file sets a username and a password in the `authentication` option, the manual webhook uses basic authentication.
+The other webhooks use the same authentication.
 
 URL template: `POST /triggers/manual?dir=$path1&dir=$path2`
 
-The following curl command sends a request to Autoscan to scan the directories `/test/one` and `/test/two`:
+The following curl command asks Autoscan to scan the directories `/test/one` and `/test/two`:
 
 ```bash
 curl --request POST \
@@ -143,10 +165,11 @@ curl --request POST \
 
 ### The -arrs
 
-If one wants to configure a HTTPTrigger with multiple distinct configurations, then these configurations MUST provide a field called `Name` which uniquely identifies the trigger.
-The name field is then used to create the route: `/triggers/:name`.
+You can configure more than one HTTP trigger of the same type.
+In that case, each trigger MUST have a `name` field with a unique value.
+Autoscan uses the name to create the route `/triggers/:name`.
 
-The following -arrs are currently provided by Autoscan:
+Autoscan provides these -arrs:
 
 - Lidarr
 - Radarr
@@ -155,32 +178,32 @@ The following -arrs are currently provided by Autoscan:
 
 #### Connecting the -arrs
 
-To add your webhook to Sonarr, Radarr, Readarr or Lidarr, do:
+To add your webhook to Sonarr, Radarr, Readarr, or Lidarr, do these steps:
 
-1. Open the `settings` page in Sonarr/Radarr/Readarr/Lidarr
-2. Select the tab `connect`
-3. Click on the big plus sign
-4. Select `webhook`
-5. Use `Autoscan` as name (or whatever you prefer)
-6. Select `On Import` and `On Upgrade`
-7. Set the URL to Autoscan's URL and add `/triggers/:name` where name is the name set in the trigger's config.
-8. Optional: set username and password.
+1. Open the `settings` page in Sonarr, Radarr, Readarr, or Lidarr.
+2. Select the `connect` tab.
+3. Click the large plus sign.
+4. Select `webhook`.
+5. Set the name to `Autoscan`, or to a different name that you prefer.
+6. Select `On Import` and `On Upgrade`.
+7. Set the URL to the Autoscan URL, followed by `/triggers/:name`. Here, `:name` is the name of the trigger in the Autoscan configuration.
+8. Optional: Set the username and the password.
 
 #### The latest events
 
-Autoscan also supports the following events in the latest versions of Radarr and Sonarr:
+Autoscan also supports these events in the latest versions of Radarr and Sonarr:
 
 - `Rename`
 - `On Movie Delete` and `On Series Delete`
 - `On Movie File Delete` and `On Episode File Delete`
 
-We are not 100% sure whether these three events cover all the possible file system interactions.
-So for now, please do keep using Bernard or the Inotify trigger to fetch all scans.
+We do not know for certain that these three events cover all possible file system changes.
+For now, keep using Bernard or the Inotify trigger to get all scans.
 
 ### Configuration
 
-A snippet of the `config.yml` file showcasing what is possible.
-You can mix and match exactly the way you like:
+This part of the `config.yml` file shows the possible configuration of the triggers.
+You can combine the triggers in the way that you like:
 
 ```yaml
 # Optionally, protect your webhooks with authentication
@@ -244,43 +267,51 @@ triggers:
 
 ## Processor
 
-Triggers pass the Scans they receive to the processor.
+Triggers send the Scans that they receive to the processor.
 The processor then saves the Scans to its datastore.
 
-_The processor uses SQLite as its datastore, feel free to hack around!_
+_The processor uses SQLite as its datastore._
 
 In a separate process, the processor selects Scans from the datastore.
-It will always group files belonging to the same folder together and it waits until all the files in that folder are older than the `minimum-age`, which defaults to 10 minutes.
+It always groups the files in the same folder together.
+It waits until all files in that folder are older than the `minimum-age` value.
+The default value is 10 minutes.
 
-When all files are older than the minimum age, then the processor will call all the configured targets in parallel to request a folder scan.
+After all files are older than the minimum age, the processor calls all configured targets in parallel.
+Each target gets a request to scan the folder.
 
 ### Anchor files
 
-To prevent the processor from calling targets when a remote mount is offline, you can define a list of so called `anchor files`.
-These anchor files do not have any special properties and often have no content.
-However, they can be used to check whether a file exists on the file system.
-If the file does not exist and you have not made any changes to the file, then it is certain that the remote mount must be offline or the software is having problems.
+An anchor file is a file that shows that a remote mount is online.
+You can define a list of `anchor files`.
+The processor then does not call targets while a remote mount is offline.
 
-When an anchor file is unavailable, the processor will halt its operations until the file is back online.
+Anchor files have no special properties and often have no content.
+Autoscan only uses them to see whether a file exists on the file system.
+Assume that you did not change an anchor file and the file is missing.
+Then the remote mount is offline or the software has a problem.
 
-We suggest you to use different anchor file names if you merge multiple remote mounts together with a tool such as [UnionFS](https://unionfs.filesystems.org) or [MergerFS](https://github.com/trapexit/mergerfs).
+If an anchor file is not available, the processor stops its operations until the file is available again.
+
+If you merge multiple remote mounts with a tool such as [UnionFS](https://unionfs.filesystems.org) or [MergerFS](https://github.com/trapexit/mergerfs), use different anchor file names.
 Each remote mount MUST have its own anchor file and its own name for that anchor file.
-In addition, make sure to define the 'merged' path to the file and not the remote mount path.
-This helps check whether the union-software is working correctly as well.
+Also, give the merged path to the file, not the path on the remote mount.
+This also shows whether the union software works correctly.
 
 ### Minimum age
 
-Autoscan does not check whether scan requests received by triggers exist on the file system.
-Therefore, to make sure a file exists before it reaches the targets, you should set a minimum age.
-The minimum age delays the scan from being send to the targets after it has been added to the queue by a trigger.
-The default minimum age is set at 10 minutes to prevent common synchronisation issues.
+Autoscan does not make sure that the files in scan requests from triggers exist on the file system.
+To make sure that a file exists before it reaches the targets, set a minimum age.
+The minimum age delays a Scan after a trigger adds it to the queue.
+Then the processor sends the Scan to the targets.
+The default minimum age is 10 minutes, which prevents common synchronization problems.
 
 ### Customising the processor
 
-The processor allows you to set the minimum age of a Scan.
-In addition, you can also define a list of anchor files.
+The processor lets you set the minimum age of a Scan.
+You can also define a list of anchor files.
 
-A snippet of the `config.yml` file:
+A part of the `config.yml` file:
 
 ```yaml
 # override the minimum age to 30 minutes:
@@ -300,26 +331,26 @@ anchors:
   - /mnt/unionfs/drive2.anchor
 ```
 
-The `minimum-age`, `scan-delay` and `scan-stats` fields should be given a string in the following format:
+The `minimum-age`, `scan-delay`, and `scan-stats` fields take a string in this format:
 
-- `1s` if the min-age should be set at 1 second.
-- `5m` if the min-age should be set at 5 minutes.
-- `1m30s` if the min-age should be set at 1 minute and 30 seconds.
-- `1h` if the min-age should be set at 1 hour.
+- `1s` sets the value to 1 second.
+- `5m` sets the value to 5 minutes.
+- `1m30s` sets the value to 1 minute and 30 seconds.
+- `1h` sets the value to 1 hour.
 
-_Please do not forget the `s`, `m` or `h` suffix, otherwise the time unit defaults to nanoseconds._
+_Do not forget the `s`, `m`, or `h` suffix. Without a suffix, the time unit is nanoseconds._
 
-Scan stats will print the following information at a configured interval:
+At the interval that `scan-stats` sets, Autoscan prints this information:
 
 - Scans processed
 - Scans remaining
 
 ## Targets
 
-While collecting Scans is fun and all, they need to have a final destination.
-Targets are these final destinations and are given Scans from the processor, one batch at a time.
+Targets are the final destination of Scans.
+The processor gives Scans to the targets, one batch at a time.
 
-Autoscan currently supports the following targets:
+Autoscan supports these targets:
 
 - Plex
 - Emby
@@ -328,10 +359,10 @@ Autoscan currently supports the following targets:
 
 ### Plex
 
-Autoscan replaces Plex's default behaviour of updating the Plex library automatically.
-Therefore, it is advised to turn off Plex's `Update my library automatically` feature.
+Autoscan replaces the default behavior of Plex that updates the Plex library automatically.
+Thus, turn off the `Update my library automatically` feature in Plex.
 
-You can setup one or multiple Plex targets in the config:
+You can set up one or more Plex targets in the configuration:
 
 ```yaml
 targets:
@@ -343,17 +374,18 @@ targets:
           to: /data/ # path accessible by the Plex docker container (if applicable)
 ```
 
-There are a couple of things to take note of in the config:
+Take note of these fields in the configuration:
 
-- URL. The URL can link to the docker container directly, the localhost or a reverse proxy sitting in front of Plex.
-- Token. We need a Plex API Token to make requests on your behalf. [This article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) should help you out.
-- Rewrite. If Plex is not running on the host OS, but in a Docker container (or Autoscan is running in a Docker container), then you need to rewrite paths accordingly. Check out our [rewriting section](#rewriting-paths) for more info.
+- URL. The URL can point to the Docker container directly, to localhost, or to a reverse proxy in front of Plex.
+- Token. Autoscan needs a Plex API Token to make requests for you. [This article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) tells you how to find your token.
+- Rewrite. Plex can run in a Docker container instead of on the host OS. Autoscan can also run in a Docker container. In both cases, you must rewrite the paths. For more information, read the [rewriting section](#rewriting-paths).
 
 ### Emby
 
-While Emby provides much better behaviour out of the box than Plex, it still might be useful to use Autoscan for even better performance.
+Emby picks up file changes better than Plex does without extra configuration.
+You can still use Autoscan for better performance.
 
-You can setup one or multiple Emby targets in the config:
+You can set up one or more Emby targets in the configuration:
 
 ```yaml
 targets:
@@ -365,16 +397,17 @@ targets:
           to: /data/ # path accessible by the Emby docker container (if applicable)
 ```
 
-- URL. The URL can link to the docker container directly, the localhost or a reverse proxy sitting in front of Emby.
-- Token. We need an Emby API Token to make requests on your behalf. [This article](https://github.com/MediaBrowser/Emby/wiki/Api-Key-Authentication) should help you out. \
-  _It's a bit out of date, but I'm sure you will manage!_
-- Rewrite. If Emby is not running on the host OS, but in a Docker container (or Autoscan is running in a Docker container), then you need to rewrite paths accordingly. Check out our [rewriting section](#rewriting-paths) for more info.
+- URL. The URL can point to the Docker container directly, to localhost, or to a reverse proxy in front of Emby.
+- Token. Autoscan needs an Emby API Token to make requests for you. [This article](https://github.com/MediaBrowser/Emby/wiki/Api-Key-Authentication) tells you how to get a token. \
+  _The article is a bit out of date._
+- Rewrite. Emby can run in a Docker container instead of on the host OS. Autoscan can also run in a Docker container. In both cases, you must rewrite the paths. For more information, read the [rewriting section](#rewriting-paths).
 
 ### Jellyfin
 
-While Jellyfin provides much better behaviour out of the box than Plex, it still might be useful to use Autoscan for even better performance.
+Jellyfin picks up file changes better than Plex does without extra configuration.
+You can still use Autoscan for better performance.
 
-You can setup one or multiple Jellyfin targets in the config:
+You can set up one or more Jellyfin targets in the configuration:
 
 ```yaml
 targets:
@@ -386,16 +419,16 @@ targets:
           to: /data/ # path accessible by the Jellyfin docker container (if applicable)
 ```
 
-- URL. The URL can link to the docker container directly, the localhost or a reverse proxy sitting in front of Jellyfin.
+- URL. The URL can point to the Docker container directly, to localhost, or to a reverse proxy in front of Jellyfin.
 - Token. We need a Jellyfin API Token to make requests on your behalf. To create one, open the Jellyfin dashboard, go to API Keys, and add a key. \
   Autoscan sends the token in the `Authorization: MediaBrowser Token="<token>"` header. Jellyfin 10.8 and later accept this header. Newer Jellyfin releases reject the legacy `X-Emby-Token` header by default. \
   If the URL contains `user:password@` for a reverse proxy with Basic authentication, autoscan uses the `Authorization` header for the proxy. In that case, autoscan sends the token in the `ApiKey` query parameter. Autoscan removes the token and the password from its logs. \
   If your proxy logs request URLs, configure it to remove the `ApiKey` parameter from its access log. Otherwise, the access log contains the token. To keep the token out of URLs, use a URL without `user:password@`, such as a direct internal Jellyfin URL.
-- Rewrite. If Jellyfin is not running on the host OS, but in a Docker container (or Autoscan is running in a Docker container), then you need to rewrite paths accordingly. Check out our [rewriting section](#rewriting-paths) for more info.
+- Rewrite. Jellyfin can run in a Docker container instead of on the host OS. Autoscan can also run in a Docker container. In both cases, you must rewrite the paths. For more information, read the [rewriting section](#rewriting-paths).
 
 ### Autoscan
 
-You can also send scan requests to other instances of autoscan!
+You can also send scan requests to other instances of Autoscan.
 
 ```yaml
 targets:
@@ -410,7 +443,8 @@ targets:
 
 ## Full config file
 
-With the examples given in the [triggers](#triggers), [processor](#processor) and [targets](#targets) sections, here is what your full config file _could_ look like:
+This example combines the examples from the [triggers](#triggers), [processor](#processor), and [targets](#targets) sections.
+A full configuration file can look like this:
 
 ```yaml
 # <- processor ->
@@ -491,24 +525,29 @@ host:
   - 192.168.0.1:5959
 ```
 
-- If no port is specified, it will use the default port configured.
-- This configuration option is only needed if you have a requirement to listen to multiple interfaces.
+Autoscan uses the value of `port` for each host entry that has no port.
+You need the `host` field only to listen on more than one interface.
 
 ## Other installation options
 
 ### Docker
 
-Autoscan has an accompanying docker image which can be found on [Docker Hub](https://hub.docker.com/r/l3uddz/autoscan).
+Autoscan has a Docker image on [Docker Hub](https://hub.docker.com/r/l3uddz/autoscan).
 
-Autoscan requires access to all files being passed between the triggers and the targets. \
-_Just mount the source directory, for many people this is `/mnt/unionfs`._
+Autoscan needs access to all files that pass between the triggers and the targets. \
+_Mount the source directory into the container. For many users, this directory is `/mnt/unionfs`._
 
-Make sure these files are available within the Autoscan container.
-Remember that you MUST use [rewriting rules](#rewriting-paths) if paths are not identical between triggers, autoscan and targets. These rules can be set from the config for each trigger and target individually.
+Make sure that these files are available in the Autoscan container.
+The paths can differ between the triggers, Autoscan, and the targets.
+In that case, you MUST use [rewrite rules](#rewriting-paths).
+You can set these rules for each trigger and each target in the configuration file.
 
 #### Version Tags
 
-Autoscan's Docker image provides various versions that are available via tags. The `latest` tag usually provides the latest stable version. Others are considered under development and caution must be exercised when using them.
+The Autoscan Docker image has different versions, which are available as tags.
+The `latest` tag usually has the latest stable version.
+The other tags are under development.
+Use them with caution.
 
 |  Tag   | Description                                        |
 | :----: | -------------------------------------------------- |
@@ -530,13 +569,14 @@ docker run \
 
 #### Parameters
 
-Autoscan's Docker image supports the following parameters.
+The Autoscan Docker image supports these parameters.
 
-|         Parameter         | Function                                                                      |
-| :-----------------------: | ----------------------------------------------------------------------------- |
-|      `-p 3030:3030`       | The port used by Autoscan's webhook triggers                                  |
-|   `--user 1000:1000`      | Run the Autoscan binary as an existing host user/group                        |
-| `-e AUTOSCAN_VERBOSITY=0` | The Autoscan logging verbosity level to use. (0 = info, 1 = debug, 2 = trace) |
-|       `-v /config`        | Autoscan's config and database file                                           |
+|         Parameter         | Function                                                                       |
+| :-----------------------: | ------------------------------------------------------------------------------ |
+|      `-p 3030:3030`       | The port that the Autoscan webhook triggers use                                |
+|   `--user 1000:1000`      | Run the Autoscan binary as an existing user and group on the host              |
+| `-e AUTOSCAN_VERBOSITY=0` | The logging verbosity level of Autoscan (0 = info, 1 = debug, 2 = trace)       |
+|       `-v /config`        | The configuration file and the database file of Autoscan                       |
 
-Any other volumes can be referenced within Autoscan's config file `config.yml`, assuming it has been specified as a volume.
+The Autoscan configuration file `config.yml` can refer to other volumes.
+You must also mount each of these volumes in the container.
