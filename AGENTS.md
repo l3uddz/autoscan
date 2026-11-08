@@ -61,15 +61,15 @@ task test
 Do not commit it. If `go mod tidy` changes `go.mod` or `go.sum`, commit
 those changes with the change that caused them.
 
-Before you push, run these commands too:
+Before you push, run this command too:
 
 ```sh
-gofmt -l $(git ls-files '*.go')
-go vet ./...
+task lint
 ```
 
-The `gofmt` command must print nothing. It reads only tracked files, because
-some files in `vendor/` are not formatted. `task build` makes a local binary in `dist/`.
+`task lint` runs `gofmt` on tracked Go files and then `go vet ./...`. If
+`gofmt` lists a file, the task fails. CI does not run it. `task build` makes a local
+binary in `dist/`.
 `task snapshot` needs goreleaser 1.7.0, which CI uses.
 
 ## CI side effects
