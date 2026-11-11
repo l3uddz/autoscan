@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>
+    Autoscan, maintained by l3uddz. Autoscan receives file change events from Sonarr, Radarr, Lidarr, Readarr and other sources, then asks Plex, Emby or Jellyfin to scan only the folders that changed instead of the full library.
+
+    The Unraid template is in the unraid/ folder of this repository. For bugs, questions and feature requests, open an issue at https://github.com/l3uddz/autoscan/issues. The full configuration reference is in the README: https://github.com/l3uddz/autoscan#readme
+  </Profile>
+</CommunityApplications>

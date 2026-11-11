@@ -12,7 +12,7 @@
   <Category>MediaApp:Other Tools:Utilities</Category>
   <WebUI/>
   <TemplateURL>https://raw.githubusercontent.com/l3uddz/autoscan/master/unraid/autoscan.xml</TemplateURL>
-  <Icon/>
+  <Icon>https://raw.githubusercontent.com/l3uddz/autoscan/master/unraid/autoscan.png</Icon>
   <ExtraParams>--user=99:100</ExtraParams>
   <PostArgs/>
   <CPUset/>
