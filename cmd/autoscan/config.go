@@ -17,6 +17,27 @@ var (
 	warnConfigDirOnce sync.Once
 )
 
+// applyDefaultPaths sets each empty path to a file in the default config
+// directory. It resolves that directory only if a path is empty, because
+// defaultConfigDirectory can create a directory. A container that sets all
+// paths then never touches $HOME.
+func applyDefaultPaths(config, database, logFile *string) {
+	if *config != "" && *database != "" && *logFile != "" {
+		return
+	}
+
+	dir := defaultConfigDirectory("autoscan", "config.yml")
+	if *config == "" {
+		*config = filepath.Join(dir, "config.yml")
+	}
+	if *database == "" {
+		*database = filepath.Join(dir, "autoscan.db")
+	}
+	if *logFile == "" {
+		*logFile = filepath.Join(dir, "activity.log")
+	}
+}
+
 func defaultConfigDirectory(app string, filename string) string {
 	// binary path
 	bcd := getBinaryPath()
