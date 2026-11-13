@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -80,9 +79,12 @@ var (
 		globals
 
 		// flags
-		Config    string `type:"path" default:"${config_file}" env:"AUTOSCAN_CONFIG" help:"Config file path"`
-		Database  string `type:"path" default:"${database_file}" env:"AUTOSCAN_DATABASE" help:"Database file path"`
-		Log       string `type:"path" default:"${log_file}" env:"AUTOSCAN_LOG" help:"Log file path"`
+		// An empty path means a file in the default config directory.
+		// applyDefaultPaths resolves it after parsing, so a set path never
+		// creates that directory.
+		Config    string `type:"path" env:"AUTOSCAN_CONFIG" help:"Config file path (default: config.yml in the default config directory)"`
+		Database  string `type:"path" env:"AUTOSCAN_DATABASE" help:"Database file path (default: autoscan.db in the default config directory)"`
+		Log       string `type:"path" env:"AUTOSCAN_LOG" help:"Log file path (default: activity.log in the default config directory)"`
 		Verbosity int    `type:"counter" default:"0" short:"v" env:"AUTOSCAN_VERBOSITY" help:"Log level verbosity"`
 	}
 )
@@ -112,10 +114,7 @@ func main() {
 			Compact: true,
 		}),
 		kong.Vars{
-			"version":       fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp),
-			"config_file":   filepath.Join(defaultConfigDirectory("autoscan", "config.yml"), "config.yml"),
-			"log_file":      filepath.Join(defaultConfigDirectory("autoscan", "config.yml"), "activity.log"),
-			"database_file": filepath.Join(defaultConfigDirectory("autoscan", "config.yml"), "autoscan.db"),
+			"version": fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp),
 		},
 	)
 
@@ -123,6 +122,8 @@ func main() {
 		fmt.Println("Failed parsing cli:", err)
 		os.Exit(1)
 	}
+
+	applyDefaultPaths(&cli.Config, &cli.Database, &cli.Log)
 
 	// logger
 	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
