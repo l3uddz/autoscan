@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review configuration for autoscan.
+# AGENTS.md holds the repository rules that these instructions refer to.
+
+language: en-US
+tone_instructions: >-
+  Be brief and direct. Report bugs, risks, and broken repository rules.
+  Do not praise the change and do not suggest style changes.
+
+reviews:
+  profile: chill
+
+  # Request changes for blocking findings, and approve when every required
+  # thread is resolved. The master ruleset requires one approval, and this
+  # approval counts. The PR author can still use "@coderabbitai approve".
+  auto_approvals:
+    enabled: true
+    allow_author_approval: true
+
+  # Keep the walkthrough short.
+  high_level_summary: true
+  poem: false
+  in_progress_fortune: false
+  sequence_diagrams: false
+  suggested_labels: false
+  suggested_reviewers: false
+
+  finishing_touches:
+    unit_tests:
+      enabled: false
+
+  pre_merge_checks:
+    title:
+      mode: error
+      requirements: >-
+        The title must use the Conventional Commits format
+        "<type>(<scope>)[!]: <summary>". The type is one of feat, fix, docs,
+        refactor, perf, test, build, ci, chore, style, or revert. The scope is
+        required and lowercase. The summary is imperative, has no trailing
+        period, and the whole title has at most 72 characters. The "!" is
+        optional and marks a breaking change.
+
+  path_filters:
+    - "!go.sum"
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: >-
+        Focus on correctness: error handling, lost or shadowed errors,
+        concurrency, resource leaks, and behavior changes for existing
+        configuration files. Do not ask for doc comments or docstrings.
+        Do not report formatting that gofmt or go vet already checks.
+    - path: "**/*_test.go"
+      instructions: >-
+        Check that each test asserts behavior and fails without the change.
+        Tests must not need network access or a running media server.
+    - path: "processor/migrations/*.sql"
+      instructions: >-
+        Flag any edit to a migration that a released version already
+        contains. A schema change must add a new numbered file, for example
+        2_<name>.sql.
+    - path: "cmd/autoscan/**"
+      instructions: >-
+        The YAML decoder is strict, so removing or renaming a configuration
+        field breaks existing configuration files. Flag such a change unless
+        the PR marks it as breaking.
+    - path: "triggers/**"
+      instructions: >-
+        A webhook trigger registers in cmd/autoscan/router.go. A background
+        trigger such as inotify registers in cmd/autoscan/main.go. Webhook
+        test payloads belong in the testdata directory of the trigger package.
+    - path: ".github/workflows/**"
+      instructions: >-
+        The Build workflow publishes public Docker tags for branch pushes and
+        a GitHub release for v* tags. Flag changes to these triggers or to the
+        published tags.
+    - path: "README.md"
+      instructions: >-
+        Check that the documented configuration keys, defaults, and behavior
+        match the code.
