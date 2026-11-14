@@ -2,6 +2,7 @@ package manual
 
 import (
 	_ "embed"
+	"errors"
 	"net/http"
 	"path"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/rs/zerolog/hlog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/triggers/webhook"
 )
 
 type Config struct {
@@ -23,80 +25,49 @@ var (
 )
 
 // New creates an autoscan-compatible HTTP Trigger for manual webhooks.
+// GET returns the web page and HEAD returns 200. Any other method scans
+// the folders in the dir query parameters.
 func New(c Config) (autoscan.HTTPTrigger, error) {
-	rewriter, err := autoscan.NewRewriter(c.Rewrite)
+	scanTrigger, err := webhook.New(c.Priority, c.Rewrite, parse, now)
 	if err != nil {
 		return nil, err
 	}
 
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
-		return handler{
-			callback: callback,
-			priority: c.Priority,
-			rewrite:  rewriter,
-		}
+		scanHandler := scanTrigger(callback)
+
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				rw.Header().Set("Content-Type", "text/html")
+				_, _ = rw.Write(template)
+			case http.MethodHead:
+				rw.WriteHeader(http.StatusOK)
+			default:
+				scanHandler.ServeHTTP(rw, r)
+			}
+		})
 	}
 
 	return trigger, nil
 }
 
-type handler struct {
-	priority int
-	rewrite  autoscan.Rewriter
-	callback autoscan.ProcessorFunc
-}
+var errNoDirectory = errors.New("manual webhook should receive at least one directory")
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	var err error
-	rlog := hlog.FromRequest(r)
-
-	query := r.URL.Query()
-	directories := query["dir"]
-
-	switch r.Method {
-	case "GET":
-		rw.Header().Set("Content-Type", "text/html")
-		_, _ = rw.Write(template)
-		return
-	case "HEAD":
-		rw.WriteHeader(http.StatusOK)
-		return
-	}
-
+func parse(r *http.Request) (webhook.Event, error) {
+	directories := r.URL.Query()["dir"]
 	if len(directories) == 0 {
-		rlog.Error().Msg("Manual webhook should receive at least one directory")
-		rw.WriteHeader(http.StatusBadRequest)
-		return
+		return webhook.Event{}, errNoDirectory
 	}
 
-	rlog.Trace().Interface("dirs", directories).Msg("Received directories")
+	hlog.FromRequest(r).Trace().Strs("dirs", directories).Msg("Received directories")
 
-	scans := make([]autoscan.Scan, 0)
-
+	event := webhook.Event{Type: "Manual"}
 	for _, dir := range directories {
-		// Rewrite the path based on the provided rewriter.
-		folderPath := h.rewrite(path.Clean(dir))
-
-		scans = append(scans, autoscan.Scan{
-			Folder:   folderPath,
-			Priority: h.priority,
-			Time:     now(),
-		})
+		event.Folders = append(event.Folders, path.Clean(dir))
 	}
 
-	err = h.callback(scans...)
-	if err != nil {
-		rlog.Error().Err(err).Msg("Processor could not process scans")
-		rw.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	rw.WriteHeader(http.StatusOK)
-	for _, scan := range scans {
-		rlog.Info().
-			Str("path", scan.Folder).
-			Msg("Scan moved to processor")
-	}
+	return event, nil
 }
 
 var now = time.Now
