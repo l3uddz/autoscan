@@ -14,7 +14,7 @@ type Config = webhook.Config
 
 // New creates an autoscan-compatible HTTP Trigger for Radarr webhooks.
 func New(c Config) (autoscan.HTTPTrigger, error) {
-	return webhook.New(c.Priority, c.Rewrite, parse, now)
+	return webhook.New(c, parse, now)
 }
 
 type radarrEvent struct {

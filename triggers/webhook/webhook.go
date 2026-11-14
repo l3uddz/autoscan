@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 
 	"github.com/l3uddz/autoscan"
@@ -44,17 +45,22 @@ type Event struct {
 // responds with 400 Bad Request.
 type Parser func(r *http.Request) (Event, error)
 
-// New returns an HTTPTrigger for parse. now returns the scan time.
-func New(priority int, rewrites []autoscan.Rewrite, parse Parser, now func() time.Time) (autoscan.HTTPTrigger, error) {
-	rewriter, err := autoscan.NewRewriter(rewrites)
+// New returns an HTTPTrigger for parse. It uses the priority, the rewrite
+// rules, and the verbosity of c. now returns the scan time.
+func New(c Config, parse Parser, now func() time.Time) (autoscan.HTTPTrigger, error) {
+	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
 		return nil, err
 	}
 
+	level, hasLevel := autoscan.ParseVerbosity(c.Verbosity)
+
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
 		return handler{
-			priority: priority,
+			priority: c.Priority,
 			rewrite:  rewriter,
+			level:    level,
+			hasLevel: hasLevel,
 			parse:    parse,
 			now:      now,
 			callback: callback,
@@ -67,12 +73,15 @@ func New(priority int, rewrites []autoscan.Rewrite, parse Parser, now func() tim
 type handler struct {
 	priority int
 	rewrite  autoscan.Rewriter
+	level    zerolog.Level
+	hasLevel bool
 	parse    Parser
 	now      func() time.Time
 	callback autoscan.ProcessorFunc
 }
 
 func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	r = h.withLogLevel(r)
 	rlog := hlog.FromRequest(r)
 
 	event, err := h.parse(r)
@@ -109,6 +118,18 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.WriteHeader(http.StatusOK)
+}
+
+// withLogLevel returns r with its request logger set to the verbosity of
+// the trigger. The parser gets the same logger through hlog.FromRequest.
+// If the trigger has no verbosity, r keeps the global log level.
+func (h handler) withLogLevel(r *http.Request) *http.Request {
+	if !h.hasLevel {
+		return r
+	}
+
+	l := hlog.FromRequest(r).Level(h.level)
+	return r.WithContext(l.WithContext(r.Context()))
 }
 
 // scans rewrites each folder and returns one scan for each unique result.

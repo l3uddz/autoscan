@@ -143,6 +143,9 @@ All triggers support these features:
 - Rewrite rules based on regular expressions: These rules translate a path from the trigger to a path on the local file system. \
   _The paths can be identical on the trigger and on the local file system. In that case, you do not need the `rewrite` field._
 
+- Trigger log level: The `verbosity` field sets the log level of the trigger, for example `trace`, `debug`, `info`, `warn`, or `error`. \
+  _If you do not set the field, or if the value is not a valid level, the trigger uses the global log level._
+
 ### Manual
 
 You can open `/triggers/manual` in a browser to submit requests manually.
@@ -261,6 +264,9 @@ triggers:
   sonarr:
     - name: sonarr-docker # /triggers/sonarr-docker
       priority: 2
+
+      # Log the events of this trigger at debug level.
+      verbosity: debug
 
       # Rewrite the path from within the container
       # to your local filesystem.
