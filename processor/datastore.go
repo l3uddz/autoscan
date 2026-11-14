@@ -54,7 +54,7 @@ func (store *datastore) Upsert(scans []autoscan.Scan) error {
 	for _, scan := range scans {
 		if err = store.upsert(tx, scan); err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				panic(rollbackErr)
+				return fmt.Errorf("%w (rollback: %w)", err, rollbackErr)
 			}
 
 			return err
