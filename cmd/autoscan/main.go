@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,7 +104,13 @@ func (v versionFlag) BeforeApply(app *kong.Kong, vars kong.Vars) error {
 	return nil
 }
 
+// retryInterval is how long the processor waits before it tries again.
+// The log messages in runProcessor say "15 seconds", so update them too.
+const retryInterval = 15 * time.Second
+
 func main() {
+	version := fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)
+
 	// parse cli
 	ctx := kong.Parse(&cli,
 		kong.Name("autoscan"),
@@ -114,7 +121,7 @@ func main() {
 			Compact: true,
 		}),
 		kong.Vars{
-			"version": fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp),
+			"version": version,
 		},
 	)
 
@@ -260,59 +267,12 @@ func main() {
 		Msg("Initialised triggers")
 
 	// targets
-	targets := make([]autoscan.Target, 0)
-
-	for _, t := range c.Targets.Autoscan {
-		tp, err := ast.New(t)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "autoscan").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
-		}
-
-		targets = append(targets, tp)
-	}
-
-	for _, t := range c.Targets.Plex {
-		tp, err := plex.New(t)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "plex").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
-		}
-
-		targets = append(targets, tp)
-	}
-
-	for _, t := range c.Targets.Emby {
-		tp, err := emby.New(t)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "emby").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
-		}
-
-		targets = append(targets, tp)
-	}
-
-	for _, t := range c.Targets.Jellyfin {
-		tp, err := jellyfin.New(t)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "jellyfin").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
-		}
-
-		targets = append(targets, tp)
-	}
+	targets := slices.Concat(
+		newTargets("autoscan", c.Targets.Autoscan, func(t ast.Config) string { return t.URL }, ast.New),
+		newTargets("plex", c.Targets.Plex, func(t plex.Config) string { return t.URL }, plex.New),
+		newTargets("emby", c.Targets.Emby, func(t emby.Config) string { return t.URL }, emby.New),
+		newTargets("jellyfin", c.Targets.Jellyfin, func(t jellyfin.Config) string { return t.URL }, jellyfin.New),
+	)
 
 	log.Info().
 		Int("autoscan", len(c.Targets.Autoscan)).
@@ -328,24 +288,49 @@ func main() {
 
 	// display initialised banner
 	log.Info().
-		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
+		Str("version", version).
 		Msg("Initialised")
 
 	// processor
 	log.Info().Msg("Processor started")
 
-	targetsAvailable := false
-	targetsSize := len(targets)
-	for {
-		// sleep indefinitely when no targets setup
-		if targetsSize == 0 {
-			log.Warn().Msg("No targets initialised, processor stopped, triggers will continue...")
-			select {}
+	if len(targets) == 0 {
+		log.Warn().Msg("No targets initialised, processor stopped, triggers will continue...")
+		select {}
+	}
+
+	runProcessor(proc, targets, c.ScanDelay)
+}
+
+// newTargets creates a target for each configuration.
+// Autoscan stops if a target fails.
+func newTargets[C any](name string, configs []C, url func(C) string, create func(C) (autoscan.Target, error)) []autoscan.Target {
+	targets := make([]autoscan.Target, 0, len(configs))
+	for _, c := range configs {
+		target, err := create(c)
+		if err != nil {
+			log.Fatal().
+				Err(err).
+				Str("target", name).
+				Str("target_url", url(c)).
+				Msg("Failed initialising target")
 		}
 
+		targets = append(targets, target)
+	}
+
+	return targets
+}
+
+// runProcessor sends scans to the targets until a fatal error occurs.
+// It waits for all targets to be available before it sends a scan.
+// After a fatal error, it blocks forever, so the triggers keep running.
+func runProcessor(proc *processor.Processor, targets []autoscan.Target, scanDelay time.Duration) {
+	targetsAvailable := false
+	for {
 		// target availability checker
 		if !targetsAvailable {
-			err = proc.CheckAvailability(targets)
+			err := proc.CheckAvailability(targets)
 			switch {
 			case err == nil:
 				targetsAvailable = true
@@ -361,31 +346,31 @@ func main() {
 					Err(err).
 					Msg("Not all targets are available, retrying in 15 seconds...")
 
-				time.Sleep(15 * time.Second)
+				time.Sleep(retryInterval)
 				continue
 			}
 		}
 
 		// process scans
-		err = proc.Process(targets)
+		err := proc.Process(targets)
 		switch {
 		case err == nil:
 			// Sleep scan-delay between successful requests to reduce the load on targets.
-			time.Sleep(c.ScanDelay)
+			time.Sleep(scanDelay)
 
 		case errors.Is(err, autoscan.ErrNoScans):
 			// No scans currently available, let's wait a couple of seconds
 			log.Trace().
 				Msg("No scans are available, retrying in 15 seconds...")
 
-			time.Sleep(15 * time.Second)
+			time.Sleep(retryInterval)
 
 		case errors.Is(err, autoscan.ErrAnchorUnavailable):
 			log.Error().
 				Err(err).
 				Msg("Not all anchor files are available, retrying in 15 seconds...")
 
-			time.Sleep(15 * time.Second)
+			time.Sleep(retryInterval)
 
 		case errors.Is(err, autoscan.ErrTargetUnavailable):
 			targetsAvailable = false
@@ -393,7 +378,7 @@ func main() {
 				Err(err).
 				Msg("Not all targets are available, retrying in 15 seconds...")
 
-			time.Sleep(15 * time.Second)
+			time.Sleep(retryInterval)
 
 		case errors.Is(err, autoscan.ErrFatal):
 			// fatal error occurred, processor must stop (however, triggers must not)
