@@ -15,7 +15,7 @@ import (
 )
 
 type datastore struct {
-	*sql.DB
+	db *sql.DB
 }
 
 var (
@@ -29,7 +29,7 @@ func newDatastore(db *sql.DB, mg *migrate.Migrator) (*datastore, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	return &datastore{db}, nil
+	return &datastore{db: db}, nil
 }
 
 const sqlUpsert = `
@@ -46,7 +46,7 @@ func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
 }
 
 func (store *datastore) Upsert(scans []autoscan.Scan) error {
-	tx, err := store.Begin()
+	tx, err := store.db.Begin()
 	if err != nil {
 		return err
 	}
@@ -67,14 +67,11 @@ func (store *datastore) Upsert(scans []autoscan.Scan) error {
 const sqlGetScansRemaining = `SELECT COUNT(folder) FROM scan`
 
 func (store *datastore) GetScansRemaining() (int, error) {
-	row := store.QueryRow(sqlGetScansRemaining)
+	row := store.db.QueryRow(sqlGetScansRemaining)
 
+	// COUNT always returns one row.
 	remaining := 0
-	err := row.Scan(&remaining)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return remaining, nil
-	case err != nil:
+	if err := row.Scan(&remaining); err != nil {
 		return remaining, fmt.Errorf("get remaining scans: %v: %w", err, autoscan.ErrFatal)
 	}
 
@@ -89,7 +86,7 @@ LIMIT 1
 `
 
 func (store *datastore) GetAvailableScan(minAge time.Duration) (autoscan.Scan, error) {
-	row := store.QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
+	row := store.db.QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
 
 	scan := autoscan.Scan{}
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
@@ -108,7 +105,7 @@ SELECT folder, priority, time FROM scan
 `
 
 func (store *datastore) GetAll() (scans []autoscan.Scan, err error) {
-	rows, err := store.Query(sqlGetAll)
+	rows, err := store.db.Query(sqlGetAll)
 	if err != nil {
 		return scans, err
 	}
@@ -132,7 +129,7 @@ DELETE FROM scan WHERE folder=?
 `
 
 func (store *datastore) Delete(scan autoscan.Scan) error {
-	_, err := store.Exec(sqlDelete, scan.Folder)
+	_, err := store.db.Exec(sqlDelete, scan.Folder)
 	if err != nil {
 		return fmt.Errorf("delete: %s: %w", err, autoscan.ErrFatal)
 	}
