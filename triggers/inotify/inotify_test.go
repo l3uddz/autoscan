@@ -60,6 +60,30 @@ func TestGetPathObject(t *testing.T) {
 			Event:    "/mnt/tv/Show/episode.mkv",
 			WantPath: "/",
 		},
+		{
+			Name:     "Matches a file in the current directory",
+			Paths:    []string{"."},
+			Event:    "./movie.mkv",
+			WantPath: ".",
+		},
+		{
+			Name:    "Does not match the parent of the current directory",
+			Paths:   []string{"."},
+			Event:   "../movie.mkv",
+			WantErr: true,
+		},
+		{
+			Name:    "Does not match an absolute path for a relative root",
+			Paths:   []string{"."},
+			Event:   "/mnt/tv/Show/episode.mkv",
+			WantErr: true,
+		},
+		{
+			Name:     "Matches a name that starts with two dots",
+			Paths:    []string{"/mnt/tv"},
+			Event:    "/mnt/tv/..Show/episode.mkv",
+			WantPath: "/mnt/tv",
+		},
 	}
 
 	for _, tc := range testCases {

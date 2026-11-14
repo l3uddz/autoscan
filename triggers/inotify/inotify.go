@@ -155,16 +155,15 @@ func (d *daemon) getPathObject(name string) (*path, error) {
 }
 
 // isWithin reports whether name is root or is below root at a directory
-// boundary. root must be clean.
+// boundary. filepath.Rel also handles the roots "/" and ".". It returns an
+// error if only one of the two paths is absolute.
 func isWithin(name, root string) bool {
-	name = filepath.Clean(name)
-	if name == root {
-		return true
+	rel, err := filepath.Rel(root, name)
+	if err != nil {
+		return false
 	}
 
-	// The root path "/" already ends with the separator.
-	prefix := strings.TrimSuffix(root, string(filepath.Separator)) + string(filepath.Separator)
-	return strings.HasPrefix(name, prefix)
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (d *daemon) worker() {
