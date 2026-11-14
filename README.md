@@ -352,6 +352,11 @@ At the interval that `scan-stats` sets, Autoscan prints this information:
 Targets are the final destination of Scans.
 The processor gives Scans to the targets, one batch at a time.
 
+Autoscan waits up to 30 seconds for each request to a target.
+If a target does not answer in that time, Autoscan treats the target as unavailable.
+The processor then checks all targets again every 15 seconds.
+The Scans stay in the datastore until all targets are available again.
+
 Autoscan supports these targets:
 
 - Plex

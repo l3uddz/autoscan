@@ -20,7 +20,7 @@ type apiClient struct {
 
 func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) apiClient {
 	return apiClient{
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: autoscan.TargetTimeout},
 		log:     log,
 		baseURL: baseURL,
 		user:    user,

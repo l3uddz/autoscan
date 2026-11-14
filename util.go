@@ -5,7 +5,13 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 )
+
+// TargetTimeout limits each HTTP request that a target sends.
+// When a request times out, the target is unavailable, and the processor
+// retries later. The scan stays in the datastore until then.
+const TargetTimeout = 30 * time.Second
 
 func JoinURL(base string, paths ...string) string {
 	// credits: https://stackoverflow.com/a/57220413
