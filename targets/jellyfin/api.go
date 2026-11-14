@@ -22,7 +22,7 @@ type apiClient struct {
 
 func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 	return apiClient{
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: autoscan.TargetTimeout},
 		log:     log,
 		baseURL: baseURL,
 		token:   token,
@@ -133,7 +133,7 @@ func (c apiClient) Libraries() ([]library, error) {
 
 	resp := make([]Response, 0)
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-		return nil, fmt.Errorf("failed decoding libraries request response: %v: %w", err, autoscan.ErrFatal)
+		return nil, autoscan.BodyError("failed decoding libraries request response", err)
 	}
 
 	// process response

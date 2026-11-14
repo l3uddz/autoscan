@@ -21,7 +21,7 @@ type apiClient struct {
 
 func newAPIClient(baseURL string, token string, log zerolog.Logger) *apiClient {
 	return &apiClient{
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: autoscan.TargetTimeout},
 		log:     log,
 		baseURL: baseURL,
 		token:   token,
@@ -81,7 +81,7 @@ func (c apiClient) Version() (string, error) {
 
 	resp := new(Response)
 	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
-		return "", fmt.Errorf("failed decoding version response: %v: %w", err, autoscan.ErrFatal)
+		return "", autoscan.BodyError("failed decoding version response", err)
 	}
 
 	return resp.MediaContainer.Version, nil
@@ -121,7 +121,7 @@ func (c apiClient) Libraries() ([]library, error) {
 
 	resp := new(Response)
 	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
-		return nil, fmt.Errorf("failed decoding libraries response: %v: %w", err, autoscan.ErrFatal)
+		return nil, autoscan.BodyError("failed decoding libraries response", err)
 	}
 
 	// process response

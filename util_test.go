@@ -1,7 +1,10 @@
 package autoscan
 
 import (
+	"encoding/json"
+	"errors"
 	"net/url"
+	"os"
 	"testing"
 )
 
@@ -53,6 +56,36 @@ func TestDSN(t *testing.T) {
 				t.Log(dsn)
 				t.Log(tc.Want)
 				t.Error("DSNs do not match")
+			}
+		})
+	}
+}
+
+func TestBodyError(t *testing.T) {
+	type Test struct {
+		Name string
+		Err  error
+		Want error
+	}
+
+	var testCases = []Test{
+		{
+			Name: "Timeout is unavailable",
+			Err:  os.ErrDeadlineExceeded,
+			Want: ErrTargetUnavailable,
+		},
+		{
+			Name: "Invalid JSON is fatal",
+			Err:  json.Unmarshal([]byte("{"), new(struct{})),
+			Want: ErrFatal,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			err := BodyError("failed decoding response", tc.Err)
+			if !errors.Is(err, tc.Want) {
+				t.Errorf("Got error %v, want %v", err, tc.Want)
 			}
 		})
 	}
