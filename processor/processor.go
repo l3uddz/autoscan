@@ -59,25 +59,19 @@ func (p *Processor) ScansProcessed() int64 {
 // CheckAvailability checks whether all targets are available.
 // If one target is not available, the error will return.
 func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
-	g := new(errgroup.Group)
-
-	for _, target := range targets {
-		target := target
-		g.Go(func() error {
-			return target.Available()
-		})
-	}
-
-	return g.Wait()
+	return forEachTarget(targets, func(target autoscan.Target) error {
+		return target.Available()
+	})
 }
 
-func (p *Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) error {
+// forEachTarget calls fn for every target at the same time.
+// It returns the first error after all calls end.
+func forEachTarget(targets []autoscan.Target, fn func(autoscan.Target) error) error {
 	g := new(errgroup.Group)
 
 	for _, target := range targets {
-		target := target
 		g.Go(func() error {
-			return target.Scan(scan)
+			return fn(target)
 		})
 	}
 
@@ -98,7 +92,9 @@ func (p *Processor) Process(targets []autoscan.Target) error {
 	}
 
 	// Fatal or Target Unavailable -> return original error
-	err = p.callTargets(targets, scan)
+	err = forEachTarget(targets, func(target autoscan.Target) error {
+		return target.Scan(scan)
+	})
 	if err != nil {
 		return err
 	}
