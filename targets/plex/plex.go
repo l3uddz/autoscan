@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
 type Config struct {
@@ -18,9 +19,7 @@ type Config struct {
 }
 
 type target struct {
-	url       string
-	token     string
-	libraries []library
+	libraries []media.Library
 
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
@@ -59,8 +58,6 @@ func New(c Config) (autoscan.Target, error) {
 		Msg("Retrieved libraries")
 
 	return &target{
-		url:       c.URL,
-		token:     c.Token,
 		libraries: libraries,
 
 		log:     l,
@@ -78,10 +75,10 @@ func (t target) Scan(scan autoscan.Scan) error {
 	// determine library for this scan
 	scanFolder := t.rewrite(scan.Folder)
 
-	libs, err := t.getScanLibrary(scanFolder)
-	if err != nil {
+	libs := media.Matching(t.libraries, scanFolder)
+	if len(libs) == 0 {
 		t.log.Warn().
-			Err(err).
+			Str("path", scanFolder).
 			Msg("No target libraries found")
 
 		return nil
@@ -104,22 +101,6 @@ func (t target) Scan(scan autoscan.Scan) error {
 	}
 
 	return nil
-}
-
-func (t target) getScanLibrary(folder string) ([]library, error) {
-	libraries := make([]library, 0)
-
-	for _, l := range t.libraries {
-		if strings.HasPrefix(folder, l.Path) {
-			libraries = append(libraries, l)
-		}
-	}
-
-	if len(libraries) == 0 {
-		return nil, fmt.Errorf("%v: failed determining libraries", folder)
-	}
-
-	return libraries, nil
 }
 
 func isSupportedVersion(version string) bool {

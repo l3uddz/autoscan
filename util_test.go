@@ -3,8 +3,11 @@ package autoscan
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -89,4 +92,59 @@ func TestBodyError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResponseError(t *testing.T) {
+	type Test struct {
+		Status int
+		Want   error
+	}
+
+	var testCases = []Test{
+		{http.StatusOK, nil},
+		{http.StatusNoContent, nil},
+		{http.StatusUnauthorized, ErrFatal},
+		{http.StatusForbidden, ErrFatal},
+		{http.StatusNotFound, ErrTargetUnavailable},
+		{http.StatusInternalServerError, ErrTargetUnavailable},
+		{http.StatusBadGateway, ErrTargetUnavailable},
+		{http.StatusServiceUnavailable, ErrTargetUnavailable},
+		{http.StatusGatewayTimeout, ErrTargetUnavailable},
+		{http.StatusNotImplemented, ErrFatal},
+	}
+
+	for _, tc := range testCases {
+		t.Run(http.StatusText(tc.Status), func(t *testing.T) {
+			body := &closeRecorder{Reader: strings.NewReader("")}
+			res := &http.Response{StatusCode: tc.Status, Status: http.StatusText(tc.Status), Body: body}
+
+			err := ResponseError(res, "invalid token")
+			if tc.Want == nil {
+				if err != nil || body.closed {
+					t.Errorf("Got error %v and closed=%v, want nil and an open body", err, body.closed)
+				}
+				return
+			}
+
+			if !errors.Is(err, tc.Want) {
+				t.Errorf("Got error %v, want %v", err, tc.Want)
+			}
+			if !body.closed {
+				t.Error("Body is open, want it closed")
+			}
+			if tc.Status == http.StatusUnauthorized && !strings.Contains(err.Error(), "invalid token") {
+				t.Errorf("Got error %v, want it to contain the auth message", err)
+			}
+		})
+	}
+}
+
+type closeRecorder struct {
+	io.Reader
+	closed bool
+}
+
+func (c *closeRecorder) Close() error {
+	c.closed = true
+	return nil
 }

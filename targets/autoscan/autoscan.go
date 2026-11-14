@@ -15,10 +15,6 @@ type Config struct {
 }
 
 type target struct {
-	url  string
-	user string
-	pass string
-
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
 	api     apiClient
@@ -35,10 +31,6 @@ func New(c Config) (autoscan.Target, error) {
 	}
 
 	return &target{
-		url:  c.URL,
-		user: c.User,
-		pass: c.Pass,
-
 		log:     l,
 		rewrite: rewriter,
 		api:     newAPIClient(c.URL, c.User, c.Pass, l),

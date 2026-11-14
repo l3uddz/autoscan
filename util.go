@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -27,6 +28,28 @@ func BodyError(msg string, err error) error {
 	}
 
 	return fmt.Errorf("%s: %v: %w", msg, err, sentinel)
+}
+
+// ResponseError returns nil for a 2xx response. For any other status, it
+// closes the response body and returns an error. A 401 status is fatal, and
+// authMessage describes it. 404 and 5xx gateway errors mean that the target
+// is unavailable. Any other status is fatal.
+func ResponseError(res *http.Response, authMessage string) error {
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		return nil
+	}
+
+	res.Body.Close()
+
+	switch res.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("%s: %s: %w", authMessage, res.Status, ErrFatal)
+	case http.StatusNotFound, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return fmt.Errorf("%s: %w", res.Status, ErrTargetUnavailable)
+	default:
+		return fmt.Errorf("%s: %w", res.Status, ErrFatal)
+	}
 }
 
 func JoinURL(base string, paths ...string) string {
