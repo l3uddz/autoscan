@@ -61,21 +61,23 @@ type Rewrite struct {
 
 type Rewriter func(string) string
 
+// NewRewriter returns a Rewriter that applies the first rule whose From
+// pattern matches the input. If no rule matches, it returns the input.
 func NewRewriter(rewriteRules []Rewrite) (Rewriter, error) {
-	var rewrites []regexp.Regexp
+	patterns := make([]string, 0, len(rewriteRules))
 	for _, rule := range rewriteRules {
-		re, err := regexp.Compile(rule.From)
-		if err != nil {
-			return nil, err
-		}
+		patterns = append(patterns, rule.From)
+	}
 
-		rewrites = append(rewrites, *re)
+	rewrites, err := compilePatterns("rewrite", patterns)
+	if err != nil {
+		return nil, err
 	}
 
 	rewriter := func(input string) string {
-		for i, r := range rewrites {
-			if r.MatchString(input) {
-				return r.ReplaceAllString(input, rewriteRules[i].To)
+		for i, re := range rewrites {
+			if re.MatchString(input) {
+				return re.ReplaceAllString(input, rewriteRules[i].To)
 			}
 		}
 
@@ -87,58 +89,51 @@ func NewRewriter(rewriteRules []Rewrite) (Rewriter, error) {
 
 type Filterer func(string) bool
 
+// NewFilterer returns a Filterer that rejects a path that matches an exclude.
+// If includes are set, it also rejects a path that matches no include.
 func NewFilterer(includes []string, excludes []string) (Filterer, error) {
-	reIncludes := make([]regexp.Regexp, 0)
-	reExcludes := make([]regexp.Regexp, 0)
-
-	// compile patterns
-	for _, pattern := range includes {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("compiling include: %v: %w", pattern, err)
-		}
-		reIncludes = append(reIncludes, *re)
+	reIncludes, err := compilePatterns("include", includes)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, pattern := range excludes {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("compiling exclude: %v: %w", pattern, err)
-		}
-		reExcludes = append(reExcludes, *re)
+	reExcludes, err := compilePatterns("exclude", excludes)
+	if err != nil {
+		return nil, err
 	}
 
-	incSize := len(reIncludes)
-	excSize := len(reExcludes)
-
-	// create filterer
-	var fn Filterer = func(string) bool { return true }
-
-	if incSize > 0 || excSize > 0 {
-		fn = func(path string) bool {
-			// check excludes
-			for _, re := range reExcludes {
-				if re.MatchString(path) {
-					return false
-				}
-			}
-
-			// no includes (but excludes did not match)
-			if incSize == 0 {
-				return true
-			}
-
-			// check includes
-			for _, re := range reIncludes {
-				if re.MatchString(path) {
-					return true
-				}
-			}
-
-			// no includes passed
+	filterer := func(path string) bool {
+		if matchesAny(reExcludes, path) {
 			return false
 		}
+
+		return len(reIncludes) == 0 || matchesAny(reIncludes, path)
 	}
 
-	return fn, nil
+	return filterer, nil
+}
+
+// compilePatterns compiles each pattern. kind names the patterns in the error.
+func compilePatterns(kind string, patterns []string) ([]*regexp.Regexp, error) {
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("compiling %s: %v: %w", kind, pattern, err)
+		}
+
+		compiled = append(compiled, re)
+	}
+
+	return compiled, nil
+}
+
+func matchesAny(patterns []*regexp.Regexp, input string) bool {
+	for _, re := range patterns {
+		if re.MatchString(input) {
+			return true
+		}
+	}
+
+	return false
 }
