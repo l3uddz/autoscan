@@ -112,7 +112,8 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 }
 
 // scans rewrites each folder and returns one scan for each unique result.
-// It keeps the order of the folders and skips empty folders.
+// It keeps the order of the folders. It skips a folder that is empty before
+// or after the rewrite, so the processor never gets a scan for "".
 func (h handler) scans(folders []string) []autoscan.Scan {
 	seen := make(map[string]bool, len(folders))
 	scans := make([]autoscan.Scan, 0, len(folders))
@@ -123,7 +124,7 @@ func (h handler) scans(folders []string) []autoscan.Scan {
 		}
 
 		folder = h.rewrite(folder)
-		if seen[folder] {
+		if folder == "" || seen[folder] {
 			continue
 		}
 

@@ -15,7 +15,10 @@ import (
 func TestHandler(t *testing.T) {
 	currentTime := time.Now()
 	now := func() time.Time { return currentTime }
-	rewrites := []autoscan.Rewrite{{From: "^/data/", To: "/mnt/"}}
+	rewrites := []autoscan.Rewrite{
+		{From: "^/data/drop$", To: ""},
+		{From: "^/data/", To: "/mnt/"},
+	}
 
 	type Test struct {
 		Name        string
@@ -47,6 +50,11 @@ func TestHandler(t *testing.T) {
 			Event:       Event{Type: "Rename", Folders: []string{"/data/tv/b", "", "/data/tv/a", "/mnt/tv/b"}},
 			WantStatus:  http.StatusOK,
 			WantFolders: []string{"/mnt/tv/b", "/mnt/tv/a"},
+		},
+		{
+			Name:       "Returns 200 without a scan when the rewrite empties the folder",
+			Event:      Event{Type: "Download", Folders: []string{"/data/drop"}},
+			WantStatus: http.StatusOK,
 		},
 		{
 			Name:        "Returns 500 when the processor fails",
