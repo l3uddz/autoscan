@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -221,13 +220,26 @@ func (d *daemon) worker() {
 	}
 }
 
+const (
+	// queueDelay is how long a path waits after its last event.
+	// Further events for the same path in that time restart the wait.
+	queueDelay = 10 * time.Second
+
+	// queueInterval is how often the queue looks for paths that are ready.
+	queueInterval = time.Second
+)
+
+// A queue collects paths from filesystem events and sends each path
+// to the processor once its delay has passed.
+// Only the worker goroutine reads or writes scans.
 type queue struct {
 	callback autoscan.ProcessorFunc
 	log      zerolog.Logger
 	priority int
+	delay    time.Duration
+	interval time.Duration
 	inputs   chan string
 	scans    map[string]time.Time
-	lock     *sync.Mutex
 }
 
 func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queue {
@@ -235,9 +247,10 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 		callback: cb,
 		log:      log,
 		priority: priority,
+		delay:    queueDelay,
+		interval: queueInterval,
 		inputs:   make(chan string),
 		scans:    make(map[string]time.Time),
-		lock:     &sync.Mutex{},
 	}
 
 	go q.worker()
@@ -245,16 +258,10 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 	return q
 }
 
-func (q *queue) add(path string) {
-	// acquire lock
-	q.lock.Lock()
-	defer q.lock.Unlock()
-
-	// queue scan task
-	q.scans[path] = time.Now().Add(10 * time.Second)
-}
-
 func (q *queue) worker() {
+	ticker := time.NewTicker(q.interval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case path, ok := <-q.inputs:
@@ -263,27 +270,15 @@ func (q *queue) worker() {
 				return
 			}
 
-			// add path to queue
-			q.add(path)
+			q.scans[path] = time.Now().Add(q.delay)
 
-		default:
-			// process queue
+		case <-ticker.C:
 			q.process()
 		}
 	}
 }
 
 func (q *queue) process() {
-	// acquire lock
-	q.lock.Lock()
-	defer q.lock.Unlock()
-
-	// sleep if no scans queued
-	if len(q.scans) == 0 {
-		time.Sleep(100 * time.Millisecond)
-		return
-	}
-
 	// move scans to processor
 	for p, t := range q.scans {
 		// time has not elapsed
