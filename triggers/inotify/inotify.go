@@ -131,14 +131,39 @@ func (d *daemon) walkFunc(path string, fi os.FileInfo, err error) error {
 	return nil
 }
 
-func (d *daemon) getPathObject(path string) (*path, error) {
-	for _, p := range d.paths {
-		if strings.HasPrefix(path, p.Path) {
-			return &p, nil
+// getPathObject returns the watched path that contains name. If more than
+// one watched path contains name, the longest one wins.
+func (d *daemon) getPathObject(name string) (*path, error) {
+	var match *path
+	matchLen := -1
+
+	for i := range d.paths {
+		root := filepath.Clean(d.paths[i].Path)
+		if !isWithin(name, root) || len(root) <= matchLen {
+			continue
 		}
+
+		match = &d.paths[i]
+		matchLen = len(root)
 	}
 
-	return nil, fmt.Errorf("path object not found: %v", path)
+	if match == nil {
+		return nil, fmt.Errorf("path object not found: %v", name)
+	}
+
+	return match, nil
+}
+
+// isWithin reports whether name is root or is below root at a directory
+// boundary. filepath.Rel also handles the roots "/" and ".". It returns an
+// error if only one of the two paths is absolute.
+func isWithin(name, root string) bool {
+	rel, err := filepath.Rel(root, name)
+	if err != nil {
+		return false
+	}
+
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (d *daemon) worker() {
