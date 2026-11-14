@@ -97,7 +97,13 @@ runs CI only after you open a PR into `master`.
   `fix(plex): handle missing library sections`. Some older commits have no
   scope. New commits must have one.
 - The repository allows only merge commits. It deletes the source branch after
-  a merge. It has no PR template and no branch protection.
+  a merge. It allows auto-merge. It has no PR template.
+- The `master protection` ruleset protects `master`. It requires the `build`
+  check and allows only merge commits. It blocks deletion and force pushes.
+- The ruleset requires no approving review. But an open "changes requested"
+  review blocks the merge. CodeRabbit reviews every PR and can request changes.
+  If you fix a CodeRabbit finding, reply in its thread. CodeRabbit approves
+  only after all of its threads are resolved.
 - A human approves and merges every PR into `master`. Do not approve, merge,
   or enable auto-merge for these PRs.
 - In a PR into `master`, use `Closes #<id>` only for issues that the PR
