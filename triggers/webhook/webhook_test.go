@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
 
 	"github.com/l3uddz/autoscan"
 )
@@ -68,7 +72,7 @@ func TestHandler(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			parse := func(*http.Request) (Event, error) { return tc.Event, tc.ParseErr }
-			trigger, err := New(3, rewrites, parse, now)
+			trigger, err := New(Config{Priority: 3, Rewrite: rewrites}, parse, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,6 +96,72 @@ func TestHandler(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tc.WantFolders) {
 				t.Errorf("Scanned folders = %v, want %v", got, tc.WantFolders)
+			}
+		})
+	}
+}
+
+func TestHandlerVerbosity(t *testing.T) {
+	type Test struct {
+		Name      string
+		Verbosity string
+		WantLogs  []string
+		WantNoLog []string
+	}
+
+	var testCases = []Test{
+		{
+			Name:      "Uses the request logger level when verbosity is empty",
+			WantLogs:  []string{"Received test event"},
+			WantNoLog: []string{"Parsed request"},
+		},
+		{
+			Name:      "Uses the request logger level when verbosity is invalid",
+			Verbosity: "loud",
+			WantLogs:  []string{"Received test event"},
+			WantNoLog: []string{"Parsed request"},
+		},
+		{
+			Name:      "Logs below the request logger level, also in the parser",
+			Verbosity: "trace",
+			WantLogs:  []string{"Parsed request", "Received test event"},
+		},
+		{
+			Name:      "Hides logs below the configured level",
+			Verbosity: "error",
+			WantNoLog: []string{"Parsed request", "Received test event"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			parse := func(r *http.Request) (Event, error) {
+				hlog.FromRequest(r).Trace().Msg("Parsed request")
+				return Event{Type: "Test"}, nil
+			}
+
+			trigger, err := New(Config{Verbosity: tc.Verbosity}, parse, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// The router gives each request a logger at the global level.
+			var logs bytes.Buffer
+			requestLog := zerolog.New(&logs).Level(zerolog.InfoLevel)
+			r := httptest.NewRequest(http.MethodPost, "/", nil)
+			r = r.WithContext(requestLog.WithContext(r.Context()))
+
+			trigger(nil).ServeHTTP(httptest.NewRecorder(), r)
+
+			for _, msg := range tc.WantLogs {
+				if !strings.Contains(logs.String(), msg) {
+					t.Errorf("Logs = %q, want %q", logs.String(), msg)
+				}
+			}
+			for _, msg := range tc.WantNoLog {
+				if strings.Contains(logs.String(), msg) {
+					t.Errorf("Logs = %q, do not want %q", logs.String(), msg)
+				}
 			}
 		})
 	}

@@ -28,7 +28,11 @@ var (
 // GET returns the web page and HEAD returns 200. Any other method scans
 // the folders in the dir query parameters.
 func New(c Config) (autoscan.HTTPTrigger, error) {
-	scanTrigger, err := webhook.New(c.Priority, c.Rewrite, parse, now)
+	scanTrigger, err := webhook.New(webhook.Config{
+		Priority:  c.Priority,
+		Rewrite:   c.Rewrite,
+		Verbosity: c.Verbosity,
+	}, parse, now)
 	if err != nil {
 		return nil, err
 	}
