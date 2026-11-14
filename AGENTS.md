@@ -100,10 +100,15 @@ runs CI only after you open a PR into `master`.
   a merge. It allows auto-merge. It has no PR template.
 - The `master protection` ruleset protects `master`. It requires the `build`
   check and allows only merge commits. It blocks deletion and force pushes.
-- The ruleset requires no approving review. But an open "changes requested"
-  review blocks the merge. CodeRabbit reviews every PR and can request changes.
-  If you fix a CodeRabbit finding, reply in its thread. CodeRabbit approves
-  only after all of its threads are resolved.
+- The ruleset requires one approving review. An open "changes requested"
+  review also blocks the merge. GitHub does not let the PR author approve
+  their own PR.
+- CodeRabbit reviews every PR and can request changes. It approves only after
+  all of its threads are resolved, and its approval counts as the required
+  review. `.coderabbit.yaml` holds its configuration. Its title check fails a
+  PR title that does not use the Conventional Commits format.
+- If you fix a CodeRabbit finding, reply in its thread. Do not post
+  `@coderabbitai approve` or `@coderabbitai resolve` to get an approval.
 - A human approves and merges every PR into `master`. Do not approve, merge,
   or enable auto-merge for these PRs.
 - In a PR into `master`, use `Closes #<id>` only for issues that the PR
