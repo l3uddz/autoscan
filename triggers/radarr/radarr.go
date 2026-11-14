@@ -77,7 +77,8 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	var folderPath string
 
-	if strings.EqualFold(event.Type, "Download") || strings.EqualFold(event.Type, "MovieFileDelete") {
+	switch {
+	case strings.EqualFold(event.Type, "Download"), strings.EqualFold(event.Type, "MovieFileDelete"):
 		if event.File.RelativePath == "" || event.Movie.FolderPath == "" {
 			rlog.Error().Msg("Required fields are missing")
 			rw.WriteHeader(http.StatusBadRequest)
@@ -85,9 +86,8 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		folderPath = path.Dir(path.Join(event.Movie.FolderPath, event.File.RelativePath))
-	}
 
-	if strings.EqualFold(event.Type, "MovieDelete") || strings.EqualFold(event.Type, "Rename") {
+	case strings.EqualFold(event.Type, "MovieDelete"), strings.EqualFold(event.Type, "Rename"):
 		if event.Movie.FolderPath == "" {
 			rlog.Error().Msg("Required fields are missing")
 			rw.WriteHeader(http.StatusBadRequest)
@@ -95,6 +95,12 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		folderPath = event.Movie.FolderPath
+
+	default:
+		// Other events, such as Grab, have no file to scan.
+		rlog.Debug().Str("event", event.Type).Msg("Ignoring unhandled event")
+		rw.WriteHeader(http.StatusOK)
+		return
 	}
 
 	scan := autoscan.Scan{
