@@ -34,26 +34,16 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
 	}
 
-	if res.StatusCode >= 200 && res.StatusCode < 300 {
-		return res, nil
+	if err := autoscan.ResponseError(res, "invalid basic auth"); err != nil {
+		c.log.Trace().
+			Stringer("request_url", res.Request.URL).
+			Int("response_status", res.StatusCode).
+			Msg("Request failed")
+
+		return nil, err
 	}
 
-	c.log.Trace().
-		Stringer("request_url", res.Request.URL).
-		Int("response_status", res.StatusCode).
-		Msg("Request failed")
-
-	// statusCode not in the 2xx range, close response
-	res.Body.Close()
-
-	switch res.StatusCode {
-	case 401:
-		return nil, fmt.Errorf("invalid basic auth: %s: %w", res.Status, autoscan.ErrFatal)
-	case 404, 500, 502, 503, 504:
-		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
-	default:
-		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
-	}
+	return res, nil
 }
 
 func (c apiClient) Available() error {

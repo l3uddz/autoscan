@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
 type apiClient struct {
@@ -37,26 +38,16 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
 	}
 
-	if res.StatusCode >= 200 && res.StatusCode < 300 {
-		return res, nil
+	if err := autoscan.ResponseError(res, "invalid plex token"); err != nil {
+		c.log.Trace().
+			Stringer("request_url", res.Request.URL).
+			Int("response_status", res.StatusCode).
+			Msg("Request failed")
+
+		return nil, err
 	}
 
-	c.log.Trace().
-		Stringer("request_url", res.Request.URL).
-		Int("response_status", res.StatusCode).
-		Msg("Request failed")
-
-	// statusCode not in the 2xx range, close response
-	res.Body.Close()
-
-	switch res.StatusCode {
-	case 401:
-		return nil, fmt.Errorf("invalid plex token: %s: %w", res.Status, autoscan.ErrFatal)
-	case 404, 500, 502, 503, 504:
-		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
-	default:
-		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
-	}
+	return res, nil
 }
 
 func (c apiClient) Version() (string, error) {
@@ -87,13 +78,7 @@ func (c apiClient) Version() (string, error) {
 	return resp.MediaContainer.Version, nil
 }
 
-type library struct {
-	ID   int
-	Name string
-	Path string
-}
-
-func (c apiClient) Libraries() ([]library, error) {
+func (c apiClient) Libraries() ([]media.Library, error) {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
@@ -125,21 +110,10 @@ func (c apiClient) Libraries() ([]library, error) {
 	}
 
 	// process response
-	libraries := make([]library, 0)
+	libraries := make([]media.Library, 0)
 	for _, lib := range resp.MediaContainer.Libraries {
 		for _, folder := range lib.Sections {
-			libPath := folder.Path
-
-			// Add trailing slash if there is none.
-			if len(libPath) > 0 && libPath[len(libPath)-1] != '/' {
-				libPath += "/"
-			}
-
-			libraries = append(libraries, library{
-				Name: lib.Name,
-				ID:   lib.ID,
-				Path: libPath,
-			})
+			libraries = append(libraries, media.NewLibrary(lib.ID, lib.Name, folder.Path))
 		}
 	}
 
