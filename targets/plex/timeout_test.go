@@ -31,3 +31,22 @@ func TestRequestsTimeOut(t *testing.T) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
+
+func TestVersionBodyTimeoutIsUnavailable(t *testing.T) {
+	// The server sends the headers, then never sends the body.
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-done
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(done) })
+
+	api := newAPIClient(srv.URL, "token", zerolog.Nop())
+	api.client.Timeout = 50 * time.Millisecond
+
+	if _, err := api.Version(); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
+	}
+}

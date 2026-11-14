@@ -107,7 +107,7 @@ func (c apiClient) Libraries() ([]library, error) {
 
 	resp := make([]Response, 0)
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-		return nil, fmt.Errorf("failed decoding libraries request response: %v: %w", err, autoscan.ErrFatal)
+		return nil, autoscan.BodyError("failed decoding libraries request response", err)
 	}
 
 	// process response
