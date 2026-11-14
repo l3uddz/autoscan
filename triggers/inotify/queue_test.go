@@ -1,6 +1,7 @@
 package inotify
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,17 +29,20 @@ func TestQueueSendsOneScanAfterDelay(t *testing.T) {
 	go q.worker()
 	defer close(q.inputs)
 
-	start := time.Now()
+	// The second event for the same path restarts the delay.
 	q.inputs <- "/mnt/media/show/"
+	time.Sleep(q.delay / 2)
+	last := time.Now()
 	q.inputs <- "/mnt/media/show/"
 
+	want := filepath.FromSlash("/mnt/media/show")
 	select {
 	case scan := <-scans:
-		if elapsed := time.Since(start); elapsed < q.delay {
-			t.Errorf("Scan sent after %v, want at least %v", elapsed, q.delay)
+		if elapsed := time.Since(last); elapsed < q.delay {
+			t.Errorf("Scan sent %v after the last event, want at least %v", elapsed, q.delay)
 		}
-		if scan.Folder != "/mnt/media/show" || scan.Priority != 3 {
-			t.Errorf("Got scan %+v, want folder /mnt/media/show with priority 3", scan)
+		if scan.Folder != want || scan.Priority != 3 {
+			t.Errorf("Got scan %+v, want folder %s with priority 3", scan, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("No scan sent within 1s")
