@@ -1,0 +1,5 @@
+CREATE TABLE parent (id INTEGER PRIMARY KEY);
+CREATE TABLE child (
+    parent_id INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED
+);
+INSERT INTO child (parent_id) VALUES (1);
