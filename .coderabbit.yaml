@@ -39,8 +39,7 @@ reviews:
         refactor, perf, test, build, ci, chore, style, or revert. The scope is
         required and lowercase. The summary is imperative, has no trailing
         period, and the whole title has at most 72 characters. The "!" is
-        optional and marks a breaking change. A GitHub default merge title
-        such as "Merge pull request #1 from owner/branch" also passes.
+        optional and marks a breaking change.
 
   path_filters:
     - "!go.sum"
