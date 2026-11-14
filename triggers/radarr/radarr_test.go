@@ -123,6 +123,16 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Returns 200 on an unhandled event without emitting a scan",
+			Given{
+				Config:  standardConfig,
+				Fixture: "testdata/grab.json",
+			},
+			Expected{
+				StatusCode: 200,
+			},
+		},
+		{
 			"Returns 200 on Test event without emitting a scan",
 			Given{
 				Config:  standardConfig,
