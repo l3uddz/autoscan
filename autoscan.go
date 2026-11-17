@@ -36,16 +36,13 @@ type Target interface {
 }
 
 var (
-	// ErrTargetUnavailable may occur when a Target goes offline
-	// or suffers from fatal errors. In this case, the processor
-	// will halt operations until the target is back online.
+	// ErrTargetUnavailable indicates that a target cannot accept scans.
 	ErrTargetUnavailable = errors.New("target unavailable")
 
 	// ErrFatal indicates a severe problem related to development.
 	ErrFatal = errors.New("fatal error")
 
-	// ErrNoScans is not an error. It only indicates whether the CLI
-	// should sleep longer depending on the processor output.
+	// ErrNoScans indicates that a target has no scan ready for delivery.
 	ErrNoScans = errors.New("no scans currently available")
 
 	// ErrAnchorUnavailable indicates that an Anchor file is

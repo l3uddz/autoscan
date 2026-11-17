@@ -64,6 +64,21 @@ func TestDSN(t *testing.T) {
 	}
 }
 
+func TestTargetRequestErrorOmitsURL(t *testing.T) {
+	requestErr := &url.Error{
+		Op:  "Get",
+		URL: "http://example.invalid/?token=example-token",
+		Err: os.ErrDeadlineExceeded,
+	}
+	err := TargetRequestError(requestErr, ErrTargetUnavailable)
+	if !errors.Is(err, ErrTargetUnavailable) || !strings.Contains(err.Error(), os.ErrDeadlineExceeded.Error()) {
+		t.Fatalf("error %q does not describe the timeout", err)
+	}
+	if strings.Contains(err.Error(), "example-token") {
+		t.Fatal("error contains the token from the request URL")
+	}
+}
+
 func TestBodyError(t *testing.T) {
 	type Test struct {
 		Name string

@@ -289,8 +289,10 @@ It always groups the files in the same folder together.
 It waits until all files in that folder are older than the `minimum-age` value.
 The default value is 10 minutes.
 
-After all files are older than the minimum age, the processor calls all configured targets in parallel.
-Each target gets a request to scan the folder.
+After the minimum age, each target receives its own request to scan the folder.
+The `scan-delay` value sets the wait between successful requests to each target.
+SQLite keeps each target's pending deliveries and retry schedule across restarts.
+When you upgrade, each configured target receives the scans that are already in the queue.
 If a trigger adds a new event for the folder during delivery, the processor keeps it queued for a follow-up scan.
 The `minimum-age` delay starts again from the new event's timestamp.
 
@@ -362,12 +364,20 @@ At the interval that `scan-stats` sets, Autoscan prints this information:
 ## Targets
 
 Targets are the final destination of Scans.
-The processor gives Scans to the targets, one batch at a time.
-
 Autoscan waits up to 30 seconds for each request to a target.
-If a target does not answer in that time, Autoscan treats the target as unavailable.
-The processor then checks all targets again every 15 seconds.
-The Scans stay in the datastore until all targets are available again.
+After the first failure at startup or during a scan, Autoscan retries that target after 15 seconds.
+Each consecutive failure doubles that target's delay up to one hour.
+Autoscan continues to retry every hour until the target recovers.
+
+Other targets continue at their usual scan rate.
+When a target recovers, Autoscan sends its pending scans at the usual rate.
+A successful scan resets the retry delay.
+Each new event for a folder queues a scan for all configured targets.
+
+Autoscan identifies a target by its type and full configured URL.
+If several entries use the same type and URL, their order distinguishes them.
+If you remove a target, Autoscan removes its pending deliveries.
+If you add a target, it receives the scans still in the queue.
 
 Autoscan supports these targets:
 

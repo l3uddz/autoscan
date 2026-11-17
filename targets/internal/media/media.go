@@ -74,7 +74,7 @@ func NewUpdatedRequest(baseURL string, path string, updateType string) (*http.Re
 
 	req, err := http.NewRequest("POST", autoscan.JoinURL(baseURL, "Library", "Media", "Updated"), bytes.NewBuffer(b))
 	if err != nil {
-		return nil, fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed creating scan request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	req.Header.Set("Content-Type", "application/json")
