@@ -16,6 +16,15 @@ import (
 // retries later. The scan stays in the datastore until then.
 const TargetTimeout = 30 * time.Second
 
+// TargetRequestError omits the request URL, which can contain credentials.
+func TargetRequestError(err, cause error) error {
+	var requestErr *url.Error
+	for errors.As(err, &requestErr) {
+		err = requestErr.Err
+	}
+	return fmt.Errorf("%v: %w", err, cause)
+}
+
 // BodyError wraps an error from reading or decoding a target response body.
 // A timeout means that the target is unavailable, so the processor retries.
 // Any other error is fatal.

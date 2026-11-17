@@ -2,7 +2,6 @@ package jellyfin
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -45,11 +44,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 
 	res, err := c.client.Do(req)
 	if err != nil {
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) {
-			urlErr.URL = redactURL(req.URL)
-		}
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, autoscan.TargetRequestError(err, autoscan.ErrTargetUnavailable)
 	}
 
 	if err := autoscan.ResponseError(res, "invalid jellyfin token"); err != nil {
@@ -81,7 +76,7 @@ func (c apiClient) Available() error {
 	reqURL := autoscan.JoinURL(c.baseURL, "System", "Info")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed creating availability request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating availability request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	// send request
@@ -99,7 +94,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 	reqURL := autoscan.JoinURL(c.baseURL, "Library", "VirtualFolders")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed creating libraries request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	// send request

@@ -47,7 +47,13 @@ ON CONFLICT (folder) DO UPDATE SET
 `
 
 func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
-	_, err := tx.Exec(sqlUpsert, scan.Folder, scan.Priority, scan.Time)
+	if _, err := tx.Exec(sqlUpsert, scan.Folder, scan.Priority, scan.Time); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`
+		INSERT OR IGNORE INTO scan_delivery (target, folder)
+		SELECT id, ? FROM scan_target
+	`, scan.Folder)
 	return err
 }
 
@@ -85,14 +91,15 @@ func (store *datastore) GetScansRemaining() (int, error) {
 }
 
 const sqlGetAvailableScan = `
-SELECT folder, priority, time, revision FROM scan
-WHERE time < ?
+SELECT scan.folder, priority, time, revision FROM scan_delivery
+JOIN scan ON scan.folder = scan_delivery.folder
+WHERE target = ? AND time < ?
 ORDER BY priority DESC, time ASC
 LIMIT 1
 `
 
-func (store *datastore) GetAvailableScan(minAge time.Duration) (queuedScan, error) {
-	row := store.db.QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
+func (store *datastore) GetAvailableScan(target string, olderThan time.Time) (queuedScan, error) {
+	row := store.db.QueryRow(sqlGetAvailableScan, target, olderThan)
 
 	var scan queuedScan
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time, &scan.revision)
@@ -105,42 +112,3 @@ func (store *datastore) GetAvailableScan(minAge time.Duration) (queuedScan, erro
 
 	return scan, nil
 }
-
-const sqlGetAll = `
-SELECT folder, priority, time FROM scan
-`
-
-func (store *datastore) GetAll() (scans []autoscan.Scan, err error) {
-	rows, err := store.db.Query(sqlGetAll)
-	if err != nil {
-		return scans, err
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		scan := autoscan.Scan{}
-		err = rows.Scan(&scan.Folder, &scan.Priority, &scan.Time)
-		if err != nil {
-			return scans, err
-		}
-
-		scans = append(scans, scan)
-	}
-
-	return scans, rows.Err()
-}
-
-const sqlDelete = `
-DELETE FROM scan WHERE folder = ? AND revision = ?
-`
-
-func (store *datastore) Delete(scan queuedScan) error {
-	_, err := store.db.Exec(sqlDelete, scan.Folder, scan.revision)
-	if err != nil {
-		return fmt.Errorf("delete: %s: %w", err, autoscan.ErrFatal)
-	}
-
-	return nil
-}
-
-var now = time.Now

@@ -10,7 +10,6 @@ require (
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/oriser/regroup v0.0.0-20240925165441-f6bb0e08289e
 	github.com/rs/zerolog v1.35.1
-	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0

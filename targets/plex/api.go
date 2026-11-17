@@ -35,7 +35,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, autoscan.TargetRequestError(err, autoscan.ErrTargetUnavailable)
 	}
 
 	if err := autoscan.ResponseError(res, "invalid plex token"); err != nil {
@@ -54,7 +54,7 @@ func (c apiClient) Version() (string, error) {
 	reqURL := autoscan.JoinURL(c.baseURL)
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed creating version request: %v: %w", err, autoscan.ErrFatal)
+		return "", fmt.Errorf("failed creating version request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	res, err := c.do(req)
@@ -82,7 +82,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed creating libraries request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	res, err := c.do(req)
@@ -124,7 +124,7 @@ func (c apiClient) Scan(path string, libraryID int) error {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections", strconv.Itoa(libraryID), "refresh")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating scan request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	q := url.Values{}

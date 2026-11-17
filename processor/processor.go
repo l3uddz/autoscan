@@ -1,24 +1,42 @@
 package processor
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/migrate"
-
-	"golang.org/x/sync/errgroup"
 )
 
 type Config struct {
 	Anchors    []string
 	MinimumAge time.Duration
+	ScanDelay  time.Duration
+	Targets    []Target
 
 	Db *sql.DB
 	Mg *migrate.Migrator
+}
+
+// Target identifies a configured destination across restarts. Open can contact
+// the server to initialize a client, so the target worker calls it.
+type Target struct {
+	ID   string
+	Open func() (autoscan.Target, error)
+}
+
+// TargetStatus reports persisted delivery and retry state for a target.
+// A zero NextRetry means no retry is scheduled.
+type TargetStatus struct {
+	ID        string
+	Pending   int
+	LastError string
+	NextRetry time.Time
 }
 
 func New(c Config) (*Processor, error) {
@@ -26,94 +44,61 @@ func New(c Config) (*Processor, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := store.configureTargets(c.Targets); err != nil {
+		return nil, fmt.Errorf("configure target deliveries: %w", err)
+	}
 
-	proc := &Processor{
+	return &Processor{
 		anchors:    c.Anchors,
 		minimumAge: c.MinimumAge,
+		scanDelay:  c.ScanDelay,
+		targets:    c.Targets,
 		store:      store,
-	}
-	return proc, nil
+	}, nil
 }
 
 type Processor struct {
 	anchors    []string
 	minimumAge time.Duration
+	scanDelay  time.Duration
+	targets    []Target
 	store      *datastore
-	processed  int64
+	processed  atomic.Int64
 }
 
 func (p *Processor) Add(scans ...autoscan.Scan) error {
 	return p.store.Upsert(scans)
 }
 
-// ScansRemaining returns the amount of scans remaining
 func (p *Processor) ScansRemaining() (int, error) {
 	return p.store.GetScansRemaining()
 }
 
-// ScansProcessed returns the amount of scans processed
 func (p *Processor) ScansProcessed() int64 {
-	return atomic.LoadInt64(&p.processed)
+	return p.processed.Load()
 }
 
-// CheckAvailability checks whether all targets are available.
-// If one target is not available, the error will return.
-func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
-	return forEachTarget(targets, func(target autoscan.Target) error {
-		return target.Available()
-	})
+func (p *Processor) TargetStatuses() ([]TargetStatus, error) {
+	return p.store.targetStatuses()
 }
 
-// forEachTarget calls fn for every target at the same time.
-// It returns the first error after all calls end.
-func forEachTarget(targets []autoscan.Target, fn func(autoscan.Target) error) error {
-	g := new(errgroup.Group)
-
-	for _, target := range targets {
-		g.Go(func() error {
-			return fn(target)
+// Run starts one worker for each target and waits for them to exit.
+func (p *Processor) Run(ctx context.Context) {
+	var workers sync.WaitGroup
+	for _, target := range p.targets {
+		workers.Go(func() {
+			p.runTarget(ctx, &targetWorker{Target: target})
 		})
 	}
-
-	return g.Wait()
+	workers.Wait()
 }
 
-func (p *Processor) Process(targets []autoscan.Target) error {
-	queued, err := p.store.GetAvailableScan(p.minimumAge)
-	if err != nil {
-		return err
-	}
-
-	// Check whether all anchors are present
+func (p *Processor) checkAnchors() error {
 	for _, anchor := range p.anchors {
-		if !fileExists(anchor) {
+		info, err := os.Stat(anchor)
+		if err != nil || info.IsDir() {
 			return fmt.Errorf("%s: %w", anchor, autoscan.ErrAnchorUnavailable)
 		}
 	}
-
-	// Fatal or Target Unavailable -> return original error
-	err = forEachTarget(targets, func(target autoscan.Target) error {
-		return target.Scan(queued.Scan)
-	})
-	if err != nil {
-		return err
-	}
-
-	// A new event can replace this revision while the targets work.
-	err = p.store.Delete(queued)
-	if err != nil {
-		return err
-	}
-
-	atomic.AddInt64(&p.processed, 1)
 	return nil
-}
-
-var fileExists = func(fileName string) bool {
-	info, err := os.Stat(fileName)
-	if err != nil {
-		return false
-	}
-
-	return !info.IsDir()
 }
