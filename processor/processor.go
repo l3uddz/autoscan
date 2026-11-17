@@ -79,7 +79,7 @@ func forEachTarget(targets []autoscan.Target, fn func(autoscan.Target) error) er
 }
 
 func (p *Processor) Process(targets []autoscan.Target) error {
-	scan, err := p.store.GetAvailableScan(p.minimumAge)
+	queued, err := p.store.GetAvailableScan(p.minimumAge)
 	if err != nil {
 		return err
 	}
@@ -93,13 +93,14 @@ func (p *Processor) Process(targets []autoscan.Target) error {
 
 	// Fatal or Target Unavailable -> return original error
 	err = forEachTarget(targets, func(target autoscan.Target) error {
-		return target.Scan(scan)
+		return target.Scan(queued.Scan)
 	})
 	if err != nil {
 		return err
 	}
 
-	err = p.store.Delete(scan)
+	// A new event can replace this revision while the targets work.
+	err = p.store.Delete(queued)
 	if err != nil {
 		return err
 	}

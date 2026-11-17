@@ -184,7 +184,7 @@ func TestGetAvailableScan(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if !reflect.DeepEqual(scan, tc.WantScan) {
+			if !reflect.DeepEqual(scan.Scan, tc.WantScan) {
 				t.Log(scan)
 				t.Log(tc.WantScan)
 				t.Errorf("Scan does not match")
@@ -195,21 +195,17 @@ func TestGetAvailableScan(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	type Test struct {
-		Name       string
-		GiveScans  []autoscan.Scan
-		GiveDelete autoscan.Scan
-		WantScans  []autoscan.Scan
+		Name      string
+		GiveScans []autoscan.Scan
+		WantScans []autoscan.Scan
 	}
 
 	var testCases = []Test{
 		{
 			Name: "Only deletes specific folder, not other folders",
 			GiveScans: []autoscan.Scan{
-				{Folder: "1"},
+				{Folder: "1", Priority: 1},
 				{Folder: "2"},
-			},
-			GiveDelete: autoscan.Scan{
-				Folder: "1",
 			},
 			WantScans: []autoscan.Scan{
 				{Folder: "2"},
@@ -225,7 +221,11 @@ func TestDelete(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = store.Delete(tc.GiveDelete)
+			scan, err := store.GetAvailableScan(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = store.Delete(scan)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -240,5 +240,50 @@ func TestDelete(t *testing.T) {
 				t.Errorf("Scans do not match")
 			}
 		})
+	}
+}
+
+func TestScanRevisionMigrationKeepsPendingScans(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	mg, err := migrate.New(db, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := migrations.ReadFile("migrations/1_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(schema)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO schema_migration (component, version) VALUES ('processor', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	first := autoscan.Scan{Folder: "/mnt/media/show", Priority: 5, Time: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}
+	other := autoscan.Scan{Folder: "/mnt/media/movie", Priority: 2, Time: first.Time.Add(-time.Hour)}
+	if _, err := db.Exec(`INSERT INTO scan (folder, priority, time) VALUES (?, ?, ?), (?, ?, ?)`,
+		first.Folder, first.Priority, first.Time, other.Folder, other.Priority, other.Time); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := newDatastore(db, mg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, err := store.GetAvailableScan(0)
+	if err != nil || scan.Scan != first {
+		t.Fatalf("first scan after upgrade = %+v, %v, want %+v, nil", scan.Scan, err, first)
+	}
+	if err := store.Delete(scan); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := store.GetAll()
+	if err != nil || len(remaining) != 1 || remaining[0] != other {
+		t.Errorf("remaining scans after deletion = %+v, %v, want [%+v], nil", remaining, err, other)
 	}
 }
