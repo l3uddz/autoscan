@@ -127,6 +127,8 @@ A Scan is a folder path with a priority.
 Autoscan supports these triggers:
 
 - Inotify: This trigger listens for changes on the file system. \
+  It keeps pending scans in memory until the processor accepts them. \
+  The retry delay starts at one second and doubles after each failed retry, up to one minute. \
   Do not use this trigger on top of RClone mounts. \
   _This trigger can still contain bugs._
 
