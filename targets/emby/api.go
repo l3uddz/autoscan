@@ -33,7 +33,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, autoscan.TargetRequestError(err, autoscan.ErrTargetUnavailable)
 	}
 
 	if err := autoscan.ResponseError(res, "invalid emby token"); err != nil {
@@ -53,7 +53,7 @@ func (c apiClient) Available() error {
 	reqURL := autoscan.JoinURL(c.baseURL, "emby", "System", "Info")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed creating availability request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating availability request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	// send request
@@ -71,7 +71,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 	reqURL := autoscan.JoinURL(c.baseURL, "emby", "Library", "SelectableMediaFolders")
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed creating libraries request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	// send request

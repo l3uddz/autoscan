@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -104,10 +106,6 @@ func (v versionFlag) BeforeApply(app *kong.Kong, vars kong.Vars) error {
 	return nil
 }
 
-// retryInterval is how long the processor waits before it tries again.
-// The log messages in runProcessor say "15 seconds", so update them too.
-const retryInterval = 15 * time.Second
-
 func main() {
 	version := fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)
 
@@ -200,10 +198,20 @@ func main() {
 			Msg("Failed initialising migrator")
 	}
 
+	// targets
+	targets := slices.Concat(
+		newTargets("autoscan", c.Targets.Autoscan, func(t ast.Config) string { return t.URL }, ast.New),
+		newTargets("plex", c.Targets.Plex, func(t plex.Config) string { return t.URL }, plex.New),
+		newTargets("emby", c.Targets.Emby, func(t emby.Config) string { return t.URL }, emby.New),
+		newTargets("jellyfin", c.Targets.Jellyfin, func(t jellyfin.Config) string { return t.URL }, jellyfin.New),
+	)
+
 	// processor
 	proc, err := processor.New(processor.Config{
 		Anchors:    c.Anchors,
 		MinimumAge: c.MinimumAge,
+		ScanDelay:  c.ScanDelay,
+		Targets:    targets,
 		Db:         db,
 		Mg:         mg,
 	})
@@ -266,20 +274,12 @@ func main() {
 		Int("sonarr", len(c.Triggers.Sonarr)).
 		Msg("Initialised triggers")
 
-	// targets
-	targets := slices.Concat(
-		newTargets("autoscan", c.Targets.Autoscan, func(t ast.Config) string { return t.URL }, ast.New),
-		newTargets("plex", c.Targets.Plex, func(t plex.Config) string { return t.URL }, plex.New),
-		newTargets("emby", c.Targets.Emby, func(t emby.Config) string { return t.URL }, emby.New),
-		newTargets("jellyfin", c.Targets.Jellyfin, func(t jellyfin.Config) string { return t.URL }, jellyfin.New),
-	)
-
 	log.Info().
 		Int("autoscan", len(c.Targets.Autoscan)).
 		Int("plex", len(c.Targets.Plex)).
 		Int("emby", len(c.Targets.Emby)).
 		Int("jellyfin", len(c.Targets.Jellyfin)).
-		Msg("Initialised targets")
+		Msg("Configured targets")
 
 	// scan stats
 	if c.ScanStats.Seconds() > 0 {
@@ -299,101 +299,28 @@ func main() {
 		select {}
 	}
 
-	runProcessor(proc, targets, c.ScanDelay)
+	proc.Run(context.Background())
 }
 
-// newTargets creates a target for each configuration.
-// Autoscan stops if a target fails.
-func newTargets[C any](name string, configs []C, url func(C) string, create func(C) (autoscan.Target, error)) []autoscan.Target {
-	targets := make([]autoscan.Target, 0, len(configs))
-	for _, c := range configs {
-		target, err := create(c)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", name).
-				Str("target_url", url(c)).
-				Msg("Failed initialising target")
+func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(C) (autoscan.Target, error)) []processor.Target {
+	targets := make([]processor.Target, 0, len(configs))
+	occurrences := make(map[string]int)
+	for _, cfg := range configs {
+		address := rawURL(cfg)
+		occurrences[address]++
+		// The URL can contain credentials. Only include its host and a digest
+		// in the ID, and distinguish repeated entries for the same address.
+		host := ""
+		if parsed, err := url.Parse(address); err == nil {
+			host = parsed.Host
 		}
-
-		targets = append(targets, target)
+		id := fmt.Sprintf("%s:%s:%x:%d", kind, host, sha256.Sum256([]byte(address)), occurrences[address])
+		targets = append(targets, processor.Target{
+			ID: id,
+			Open: func() (autoscan.Target, error) {
+				return open(cfg)
+			},
+		})
 	}
-
 	return targets
-}
-
-// runProcessor sends scans to the targets until a fatal error occurs.
-// It waits for all targets to be available before it sends a scan.
-// After a fatal error, it blocks forever, so the triggers keep running.
-func runProcessor(proc *processor.Processor, targets []autoscan.Target, scanDelay time.Duration) {
-	targetsAvailable := false
-	for {
-		// target availability checker
-		if !targetsAvailable {
-			err := proc.CheckAvailability(targets)
-			switch {
-			case err == nil:
-				targetsAvailable = true
-			case errors.Is(err, autoscan.ErrFatal):
-				log.Error().
-					Err(err).
-					Msg("Fatal error occurred while checking target availability, processor stopped, triggers will continue...")
-
-				// sleep indefinitely
-				select {}
-			default:
-				log.Error().
-					Err(err).
-					Msg("Not all targets are available, retrying in 15 seconds...")
-
-				time.Sleep(retryInterval)
-				continue
-			}
-		}
-
-		// process scans
-		err := proc.Process(targets)
-		switch {
-		case err == nil:
-			// Sleep scan-delay between successful requests to reduce the load on targets.
-			time.Sleep(scanDelay)
-
-		case errors.Is(err, autoscan.ErrNoScans):
-			// No scans currently available, let's wait a couple of seconds
-			log.Trace().
-				Msg("No scans are available, retrying in 15 seconds...")
-
-			time.Sleep(retryInterval)
-
-		case errors.Is(err, autoscan.ErrAnchorUnavailable):
-			log.Error().
-				Err(err).
-				Msg("Not all anchor files are available, retrying in 15 seconds...")
-
-			time.Sleep(retryInterval)
-
-		case errors.Is(err, autoscan.ErrTargetUnavailable):
-			targetsAvailable = false
-			log.Error().
-				Err(err).
-				Msg("Not all targets are available, retrying in 15 seconds...")
-
-			time.Sleep(retryInterval)
-
-		case errors.Is(err, autoscan.ErrFatal):
-			// fatal error occurred, processor must stop (however, triggers must not)
-			log.Error().
-				Err(err).
-				Msg("Fatal error occurred while processing targets, processor stopped, triggers will continue...")
-
-			// sleep indefinitely
-			select {}
-
-		default:
-			// unexpected error
-			log.Fatal().
-				Err(err).
-				Msg("Failed processing targets")
-		}
-	}
 }

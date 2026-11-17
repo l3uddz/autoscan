@@ -28,12 +28,30 @@ func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
 	return scan, err
 }
 
+func pendingScans(store *datastore) (scans []autoscan.Scan, err error) {
+	rows, err := store.db.Query(`SELECT folder, priority, time FROM scan`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var scan autoscan.Scan
+		if err := rows.Scan(&scan.Folder, &scan.Priority, &scan.Time); err != nil {
+			return nil, err
+		}
+		scans = append(scans, scan)
+	}
+	return scans, rows.Err()
+}
+
 func getDatastore(t *testing.T) *datastore {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
 	mg, err := migrate.New(db, "migrations")
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +62,9 @@ func getDatastore(t *testing.T) *datastore {
 		t.Fatal(err)
 	}
 
+	if err := ds.configureTargets([]Target{{ID: "target"}}); err != nil {
+		t.Fatal(err)
+	}
 	return ds
 }
 
@@ -175,16 +196,12 @@ func TestGetAvailableScan(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			now = func() time.Time {
-				return tc.Now
-			}
-
-			scan, err := store.GetAvailableScan(tc.MinAge)
+			scan, err := store.GetAvailableScan("target", tc.Now.Add(-tc.MinAge))
 			if !errors.Is(err, tc.WantErr) {
 				t.Fatal(err)
 			}
 
-			if !reflect.DeepEqual(scan, tc.WantScan) {
+			if !reflect.DeepEqual(scan.Scan, tc.WantScan) {
 				t.Log(scan)
 				t.Log(tc.WantScan)
 				t.Errorf("Scan does not match")
@@ -193,23 +210,19 @@ func TestGetAvailableScan(t *testing.T) {
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestCompleteDelivery(t *testing.T) {
 	type Test struct {
-		Name       string
-		GiveScans  []autoscan.Scan
-		GiveDelete autoscan.Scan
-		WantScans  []autoscan.Scan
+		Name      string
+		GiveScans []autoscan.Scan
+		WantScans []autoscan.Scan
 	}
 
 	var testCases = []Test{
 		{
 			Name: "Only deletes specific folder, not other folders",
 			GiveScans: []autoscan.Scan{
-				{Folder: "1"},
+				{Folder: "1", Priority: 1},
 				{Folder: "2"},
-			},
-			GiveDelete: autoscan.Scan{
-				Folder: "1",
 			},
 			WantScans: []autoscan.Scan{
 				{Folder: "2"},
@@ -225,12 +238,16 @@ func TestDelete(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = store.Delete(tc.GiveDelete)
+			scan, err := store.GetAvailableScan("target", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = store.completeDelivery("target", scan)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			scans, err := store.GetAll()
+			scans, err := pendingScans(store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -240,5 +257,82 @@ func TestDelete(t *testing.T) {
 				t.Errorf("Scans do not match")
 			}
 		})
+	}
+}
+
+func TestScanRevisionMigrationKeepsPendingScans(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	mg, err := migrate.New(db, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := migrations.ReadFile("migrations/1_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(schema)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO schema_migration (component, version) VALUES ('processor', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	first := autoscan.Scan{Folder: "/mnt/media/show", Priority: 5, Time: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}
+	other := autoscan.Scan{Folder: "/mnt/media/movie", Priority: 2, Time: first.Time.Add(-time.Hour)}
+	if _, err := db.Exec(`INSERT INTO scan (folder, priority, time) VALUES (?, ?, ?), (?, ?, ?)`,
+		first.Folder, first.Priority, first.Time, other.Folder, other.Priority, other.Time); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := newDatastore(db, mg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.configureTargets([]Target{{ID: "target"}, {ID: "other target"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	scan, err := store.GetAvailableScan("target", time.Now())
+	if err != nil || scan.Scan != first {
+		t.Fatalf("first scan after upgrade = %+v, %v, want %+v, nil", scan.Scan, err, first)
+	}
+	if _, err := store.completeDelivery("target", scan); err != nil {
+		t.Fatal(err)
+	}
+	otherTargetScan, err := store.GetAvailableScan("other target", time.Now())
+	if err != nil || otherTargetScan.Scan != first {
+		t.Fatalf("other target's first scan after upgrade = %+v, %v, want %+v, nil", otherTargetScan.Scan, err, first)
+	}
+	if _, err := store.completeDelivery("other target", otherTargetScan); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := pendingScans(store)
+	if err != nil || len(remaining) != 1 || remaining[0] != other {
+		t.Errorf("remaining scans after deletion = %+v, %v, want [%+v], nil", remaining, err, other)
+	}
+}
+
+func TestQueuedScansSurviveAStartupWithoutTargets(t *testing.T) {
+	store := getDatastore(t)
+	scan := autoscan.Scan{Folder: "queued", Time: time.Now().UTC().Add(-time.Hour)}
+	if err := store.Upsert([]autoscan.Scan{scan}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.configureTargets(nil); err != nil {
+		t.Fatal(err)
+	}
+	if statuses, err := store.targetStatuses(); err != nil || len(statuses) != 0 {
+		t.Fatalf("target statuses = %+v, %v, want no configured targets", statuses, err)
+	}
+	if err := store.configureTargets([]Target{{ID: "new target"}}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := store.GetAvailableScan("new target", time.Now())
+	if err != nil || queued.Scan != scan {
+		t.Fatalf("new target's pending scan = %+v, %v, want %+v, nil", queued.Scan, err, scan)
 	}
 }

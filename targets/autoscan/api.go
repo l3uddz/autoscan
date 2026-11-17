@@ -31,7 +31,7 @@ func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) 
 func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, autoscan.TargetRequestError(err, autoscan.ErrTargetUnavailable)
 	}
 
 	if err := autoscan.ResponseError(res, "invalid basic auth"); err != nil {
@@ -50,7 +50,7 @@ func (c apiClient) Available() error {
 	// create request
 	req, err := http.NewRequest("HEAD", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
 	if err != nil {
-		return fmt.Errorf("failed creating head request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating head request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	if c.user != "" && c.pass != "" {
@@ -71,7 +71,7 @@ func (c apiClient) Scan(path string) error {
 	// create request
 	req, err := http.NewRequest("POST", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
 	if err != nil {
-		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating scan request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
 	}
 
 	if c.user != "" && c.pass != "" {
