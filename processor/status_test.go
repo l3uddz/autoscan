@@ -49,8 +49,7 @@ func TestStatusStopsWaitingForHungAnchorCheck(t *testing.T) {
 		if err := proc.store.recordFailure("plex", 15*time.Second, retryAt, "offline"); err != nil {
 			t.Fatal(err)
 		}
-		hung := &anchorProbe{done: make(chan struct{})}
-		proc.anchorProbe = hung
+		hung := hangAnchorCheck(proc)
 
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()

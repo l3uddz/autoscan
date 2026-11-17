@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -91,6 +92,64 @@ func (p *Processor) Run(ctx context.Context) {
 		})
 	}
 	workers.Wait()
+}
+
+// anchorTimeout limits how long a delivery waits for the anchor check.
+const anchorTimeout = 10 * time.Second
+
+// waitForAnchors waits for the shared anchor check. A check that does not
+// finish within anchorTimeout counts as an unavailable anchor.
+func (p *Processor) waitForAnchors(ctx context.Context) error {
+	if len(p.anchors) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
+	defer cancel()
+	err := p.probeAnchors().wait(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("anchor check did not finish within %v: %w", anchorTimeout, autoscan.ErrAnchorUnavailable)
+	}
+	return err
+}
+
+// anchorProbe is one anchor check that delivery workers and status requests
+// share. os.Stat on a hung network mount can block indefinitely and ignores
+// contexts, so at most one check runs at a time.
+type anchorProbe struct {
+	done chan struct{}
+	err  error
+}
+
+func (p *Processor) probeAnchors() *anchorProbe {
+	p.anchorMu.Lock()
+	defer p.anchorMu.Unlock()
+	if p.anchorProbe == nil {
+		probe := &anchorProbe{done: make(chan struct{})}
+		p.anchorProbe = probe
+		go func() {
+			probe.err = p.checkAnchors()
+			p.anchorMu.Lock()
+			p.anchorProbe = nil
+			p.anchorMu.Unlock()
+			close(probe.done)
+		}()
+	}
+	return p.anchorProbe
+}
+
+func (probe *anchorProbe) wait(ctx context.Context) error {
+	// Use a finished result even if the context also ended.
+	select {
+	case <-probe.done:
+		return probe.err
+	default:
+	}
+	select {
+	case <-probe.done:
+		return probe.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (p *Processor) checkAnchors() error {
