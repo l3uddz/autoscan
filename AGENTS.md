@@ -35,6 +35,23 @@ start a library scan for the folder.
 
 ## Code changes
 
+### Code quality
+
+Apply SOLID, KISS, DRY, and YAGNI to each code change.
+
+- Give each package and function a clear responsibility. Keep interfaces small
+  and define them where callers use them.
+- Prefer direct control flow and names that explain intent.
+- Reuse existing code when it implements the same rule. Keep separate rules
+  independent even if their code looks similar.
+- Add abstractions, configuration, and dependencies only for current needs.
+- Before delivery, review the diff for duplicated rules, unnecessary
+  abstraction, and unused code. Fix the problems that the change introduces.
+- Preserve behavior outside the requested scope. Keep input validation and
+  error handling that prevents lost work.
+
+### Repository conventions
+
 - If you add a trigger, add a package under `triggers/` and add its
   configuration to `cmd/autoscan/main.go`. Register an `HTTPTrigger` (webhook)
   in `cmd/autoscan/router.go`. Register a background `Trigger`, such as
