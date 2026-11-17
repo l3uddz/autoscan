@@ -325,7 +325,7 @@ func TestQueuedScansSurviveAStartupWithoutTargets(t *testing.T) {
 	if err := store.configureTargets(nil); err != nil {
 		t.Fatal(err)
 	}
-	if statuses, err := store.targetStatuses(); err != nil || len(statuses) != 0 {
+	if statuses, _, err := store.queueStatus(t.Context()); err != nil || len(statuses) != 0 {
 		t.Fatalf("target statuses = %+v, %v, want no configured targets", statuses, err)
 	}
 	if err := store.configureTargets([]Target{{ID: "new target"}}); err != nil {

@@ -79,10 +79,6 @@ func (p *Processor) ScansProcessed() int64 {
 	return p.processed.Load()
 }
 
-func (p *Processor) TargetStatuses() ([]TargetStatus, error) {
-	return p.store.targetStatuses()
-}
-
 // Run starts one worker for each target and waits for them to exit.
 func (p *Processor) Run(ctx context.Context) {
 	var workers sync.WaitGroup

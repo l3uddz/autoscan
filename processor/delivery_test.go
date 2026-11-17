@@ -218,7 +218,7 @@ func assertDelivered(t *testing.T, target *fakeTarget, folders ...string) {
 
 func assertTargetStatus(t *testing.T, proc *Processor, id string, pending int, lastError string, nextRetry time.Time) {
 	t.Helper()
-	statuses, err := proc.TargetStatuses()
+	statuses, _, err := proc.store.queueStatus(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

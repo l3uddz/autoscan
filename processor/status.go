@@ -93,7 +93,7 @@ func (store *datastore) queueStatus(ctx context.Context) ([]TargetStatus, *time.
 	}
 	defer tx.Rollback()
 
-	targets, err := readTargetStatuses(tx.QueryContext(ctx, sqlTargetStatuses))
+	targets, err := targetStatuses(ctx, tx)
 	if err != nil {
 		return nil, nil, err
 	}
