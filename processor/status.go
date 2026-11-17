@@ -32,6 +32,9 @@ func (p *Processor) Status(ctx context.Context) Status {
 	if len(p.anchors) > 0 {
 		anchors = p.probeAnchors()
 	}
+	// Compare the queue state with the time of its read, not with the time
+	// after the anchor wait.
+	now := time.Now()
 	targets, oldest, err := p.store.queueStatus(ctx)
 	if anchors != nil && anchors.wait(ctx) != nil {
 		status.Blockers = append(status.Blockers, "anchor_unavailable")
@@ -44,11 +47,11 @@ func (p *Processor) Status(ctx context.Context) Status {
 		return status
 	}
 	if oldest != nil {
-		age := int64(max(0, time.Since(*oldest)) / time.Second)
+		age := int64(max(0, now.Sub(*oldest)) / time.Second)
 		status.OldestPendingAge = &age
 	}
 	var hasReadyTarget bool
-	status.Targets, hasReadyTarget = p.deliveryStatuses(targets)
+	status.Targets, hasReadyTarget = p.deliveryStatuses(targets, now)
 	status.CanDeliver = len(status.Blockers) == 0 && hasReadyTarget
 	return status
 }
@@ -93,14 +96,13 @@ func (probe *anchorProbe) wait(ctx context.Context) error {
 	}
 }
 
-func (p *Processor) deliveryStatuses(targets []TargetStatus) ([]DeliveryStatus, bool) {
+func (p *Processor) deliveryStatuses(targets []TargetStatus, now time.Time) ([]DeliveryStatus, bool) {
 	byID := make(map[string]TargetStatus, len(targets))
 	for _, target := range targets {
 		byID[target.ID] = target
 	}
 	deliveries := make([]DeliveryStatus, 0, len(p.targets))
 	ready := false
-	now := time.Now()
 	for i, configured := range p.targets {
 		target, ok := byID[configured.ID]
 		if !ok {

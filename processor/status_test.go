@@ -45,6 +45,10 @@ func TestStatusStopsWaitingForHungAnchorCheck(t *testing.T) {
 			t.Fatal(err)
 		}
 		proc := testProcessorWithConfig(t, Config{Anchors: []string{anchor}, Targets: []Target{connectedTarget("plex", &fakeTarget{})}})
+		retryAt := time.Now().Add(time.Second)
+		if err := proc.store.recordFailure("plex", 15*time.Second, retryAt, "offline"); err != nil {
+			t.Fatal(err)
+		}
 		hung := &anchorProbe{done: make(chan struct{})}
 		proc.anchorProbe = hung
 
@@ -56,7 +60,11 @@ func TestStatusStopsWaitingForHungAnchorCheck(t *testing.T) {
 			t.Errorf("Status waited %v, want the 2s deadline", waited)
 		}
 		if !slices.Equal(status.Blockers, []string{"anchor_unavailable"}) || len(status.Targets) != 1 {
-			t.Errorf("status = %+v, want only the anchor blocker and the target state", status)
+			t.Fatalf("status = %+v, want only the anchor blocker and the target state", status)
+		}
+		// The retry time passes during the wait, but the target state is from before it.
+		if next := status.Targets[0].NextRetry; next == nil || !next.Equal(retryAt) {
+			t.Errorf("next retry = %v, want %v from the time of the queue read", next, retryAt)
 		}
 		if proc.anchorProbe != hung {
 			t.Error("Status started a second anchor check while one was running")
