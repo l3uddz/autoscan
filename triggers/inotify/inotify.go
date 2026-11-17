@@ -252,19 +252,24 @@ const (
 
 	// queueInterval is how often the queue looks for paths that are ready.
 	queueInterval = time.Second
+
+	queueRetryMin = time.Second
+	queueRetryMax = time.Minute
 )
 
-// A queue collects paths from filesystem events and sends each path
-// to the processor once its delay has passed.
+type pendingScan struct {
+	readyAt    time.Time
+	retryDelay time.Duration
+}
+
+// A queue holds filesystem paths until the processor accepts them.
 // Only the worker goroutine reads or writes scans.
 type queue struct {
 	callback autoscan.ProcessorFunc
 	log      zerolog.Logger
 	priority int
-	delay    time.Duration
-	interval time.Duration
 	inputs   chan string
-	scans    map[string]time.Time
+	scans    map[string]pendingScan
 }
 
 func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queue {
@@ -272,10 +277,8 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 		callback: cb,
 		log:      log,
 		priority: priority,
-		delay:    queueDelay,
-		interval: queueInterval,
 		inputs:   make(chan string),
-		scans:    make(map[string]time.Time),
+		scans:    make(map[string]pendingScan),
 	}
 
 	go q.worker()
@@ -284,7 +287,7 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 }
 
 func (q *queue) worker() {
-	ticker := time.NewTicker(q.interval)
+	ticker := time.NewTicker(queueInterval)
 	defer ticker.Stop()
 
 	for {
@@ -295,7 +298,12 @@ func (q *queue) worker() {
 				return
 			}
 
-			q.scans[path] = time.Now().Add(q.delay)
+			scan := q.scans[path]
+			// A new event restarts the normal wait without shortening a retry.
+			if readyAt := time.Now().Add(queueDelay); readyAt.After(scan.readyAt) {
+				scan.readyAt = readyAt
+				q.scans[path] = scan
+			}
 
 		case <-ticker.C:
 			q.process()
@@ -304,32 +312,33 @@ func (q *queue) worker() {
 }
 
 func (q *queue) process() {
-	// move scans to processor
-	for p, t := range q.scans {
-		// time has not elapsed
-		if time.Now().Before(t) {
+	for path, scan := range q.scans {
+		now := time.Now()
+		if now.Before(scan.readyAt) {
 			continue
 		}
 
-		// move to processor
 		err := q.callback(autoscan.Scan{
-			Folder:   filepath.Clean(p),
+			Folder:   filepath.Clean(path),
 			Priority: q.priority,
-			Time:     time.Now(),
+			Time:     now,
 		})
 
 		if err != nil {
+			scan.retryDelay = min(queueRetryMax, max(queueRetryMin, 2*scan.retryDelay))
+			scan.readyAt = time.Now().Add(scan.retryDelay)
+			q.scans[path] = scan
 			q.log.Error().
 				Err(err).
-				Str("path", p).
-				Msg("Failed moving scan to processor")
-		} else {
-			q.log.Info().
-				Str("path", p).
-				Msg("Scan moved to processor")
+				Str("path", path).
+				Dur("retry_delay", scan.retryDelay).
+				Msg("Failed moving scan to processor, will retry")
+			continue
 		}
 
-		// remove queued scan
-		delete(q.scans, p)
+		delete(q.scans, path)
+		q.log.Info().
+			Str("path", path).
+			Msg("Scan moved to processor")
 	}
 }
