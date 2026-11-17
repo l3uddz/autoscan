@@ -54,6 +54,7 @@ func (p *Processor) deliveryStatuses(targets []TargetStatus) ([]DeliveryStatus, 
 	}
 	deliveries := make([]DeliveryStatus, 0, len(p.targets))
 	ready := false
+	now := time.Now()
 	for i, configured := range p.targets {
 		target, ok := byID[configured.ID]
 		if !ok {
@@ -64,10 +65,12 @@ func (p *Processor) deliveryStatuses(targets []TargetStatus) ([]DeliveryStatus, 
 			label = strconv.Itoa(i + 1)
 		}
 		delivery := DeliveryStatus{ID: label, Pending: target.Pending, LastError: publicTargetError(target.LastError)}
-		if target.NextRetry.IsZero() {
-			ready = true
-		} else {
+		// The retry record stays until a delivery succeeds, so only a future
+		// retry time means that the worker waits. This matches deliver.
+		if target.NextRetry.After(now) {
 			delivery.NextRetry = &target.NextRetry
+		} else {
+			ready = true
 		}
 		deliveries = append(deliveries, delivery)
 	}
