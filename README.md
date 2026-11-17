@@ -372,7 +372,7 @@ If `authentication` sets both a username and a password, use the same Basic auth
 | Field | Meaning |
 | --- | --- |
 | `can_deliver` | `true` if no shared blocker exists and at least one target is not waiting for a retry. |
-| `blockers` | Reasons that affect all targets. Values include `anchor_unavailable`, `database_unavailable`, and `no_targets`. |
+| `blockers` | Reasons that affect all targets. Values include `anchor_unavailable`, `database_unavailable`, and `no_targets`. Autoscan also reports `anchor_unavailable` if the anchor check does not finish within two seconds, for example on a hung network mount. |
 | `oldest_pending_scan_age_seconds` | Age of the oldest queued scan in whole seconds, or `null` if the queue is empty or unavailable. |
 | `targets` | The status of each configured target. This list is empty if the database is unavailable. |
 
@@ -380,8 +380,8 @@ Each target has an `id`, a `pending` scan count, a `last_error`, and a `next_ret
 The `id` uses the target type and its position in that type's configuration list. For example, `plex-1` identifies the first Plex target.
 `last_error` is a fixed message for the latest failure, or an empty string when the target has no retry state.
 `next_retry` is the UTC time of the next retry, or `null` when the target is not waiting for a retry.
-A target can keep its `last_error` after its retry time passes, until a scan delivery succeeds.
 A shared blocker can delay delivery past that time.
+A target keeps its `last_error` after its retry time passes, until a scan delivery succeeds.
 The response excludes raw target errors, credentials, and file paths.
 
 The endpoint returns HTTP 200 when `can_deliver` is `true` and HTTP 503 otherwise.

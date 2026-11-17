@@ -1,7 +1,11 @@
 package processor
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -30,6 +34,32 @@ func TestStatusReadyAfterReconnectWithYoungScans(t *testing.T) {
 		status := proc.Status(t.Context())
 		if !status.CanDeliver || len(status.Targets) != 1 || status.Targets[0].Pending != 1 || status.Targets[0].NextRetry != nil {
 			t.Fatalf("status after reconnect = %+v, want a ready target with one pending scan", status)
+		}
+	})
+}
+
+func TestStatusStopsWaitingForHungAnchorCheck(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		anchor := filepath.Join(t.TempDir(), "mount.anchor")
+		if err := os.WriteFile(anchor, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		proc := testProcessorWithConfig(t, Config{Anchors: []string{anchor}, Targets: []Target{connectedTarget("plex", &fakeTarget{})}})
+		hung := &anchorProbe{done: make(chan struct{})}
+		proc.anchorProbe = hung
+
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		status := proc.Status(ctx)
+		if waited := time.Since(start); waited != 2*time.Second {
+			t.Errorf("Status waited %v, want the 2s deadline", waited)
+		}
+		if !slices.Equal(status.Blockers, []string{"anchor_unavailable"}) || len(status.Targets) != 1 {
+			t.Errorf("status = %+v, want only the anchor blocker and the target state", status)
+		}
+		if proc.anchorProbe != hung {
+			t.Error("Status started a second anchor check while one was running")
 		}
 	})
 }

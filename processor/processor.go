@@ -65,6 +65,9 @@ type Processor struct {
 	targets    []Target
 	store      *datastore
 	processed  atomic.Int64
+
+	anchorMu    sync.Mutex
+	anchorProbe *anchorProbe
 }
 
 func (p *Processor) Add(scans ...autoscan.Scan) error {
