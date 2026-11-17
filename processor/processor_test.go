@@ -78,8 +78,12 @@ func TestProcessKeepsScanEnqueuedDuringDispatch(t *testing.T) {
 					t.Fatalf("follow-up delivery: %v", err)
 				}
 				want := autoscan.Scan{Folder: first.Folder, Priority: first.Priority, Time: followUp.Time}
-				if len(target.scans) != 2 || target.scans[1] != want {
-					t.Errorf("delivered scans = %+v, want [%+v %+v]", target.scans, first, want)
+				if len(target.scans) != 2 {
+					t.Fatalf("delivered scans = %+v, want [%+v %+v]", target.scans, first, want)
+				}
+				got := target.scans[1]
+				if got.Folder != want.Folder || got.Priority != want.Priority || !got.Time.Equal(want.Time) {
+					t.Errorf("follow-up scan = %+v, want %+v", got, want)
 				}
 				if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
 					t.Errorf("ScansRemaining after follow-up delivery = %d, %v, want 0, nil", remaining, err)
