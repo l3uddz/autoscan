@@ -67,26 +67,24 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
 
 ## Checks
 
-You need Go and [Task](https://taskfile.dev). CI runs these commands in this order:
+You need Go and [Task](https://taskfile.dev). The required `build` job runs the
+following commands in order before packaging. Run the same commands before you
+push.
 
 ```sh
 task vendor
 task test
+task lint
 ```
 
 `task vendor` creates `vendor/` and runs `go mod tidy`. Git ignores `vendor/`.
 Do not commit it. If `go mod tidy` changes `go.mod` or `go.sum`, commit
 those changes with the change that caused them.
 
-Before you push, run this command too:
-
-```sh
-task lint
-```
-
 `task lint` runs `gofmt` on tracked Go files and then `go vet ./...`. If
-`gofmt` lists a file, the task fails. CI does not run it. `task build` makes a local
-binary in `dist/`.
+`gofmt` lists a file, the task fails. A lint failure fails the `build` job.
+
+`task build` makes a local binary in `dist/`.
 `task snapshot` needs goreleaser 1.7.0, which CI uses.
 
 ## CI side effects
