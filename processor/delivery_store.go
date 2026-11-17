@@ -1,6 +1,8 @@
 package processor
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -114,8 +116,8 @@ func (store *datastore) completeDelivery(target string, scan queuedScan) (int64,
 	return count, tx.Commit()
 }
 
-func (store *datastore) targetStatuses() ([]TargetStatus, error) {
-	rows, err := store.db.Query(`
+func targetStatuses(ctx context.Context, tx *sql.Tx) ([]TargetStatus, error) {
+	rows, err := tx.QueryContext(ctx, `
 		SELECT id, last_error, next_retry,
 			(SELECT COUNT(*) FROM scan_delivery WHERE target = scan_target.id)
 		FROM scan_target ORDER BY id

@@ -305,7 +305,7 @@ func main() {
 func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(C) (autoscan.Target, error)) []processor.Target {
 	targets := make([]processor.Target, 0, len(configs))
 	occurrences := make(map[string]int)
-	for _, cfg := range configs {
+	for i, cfg := range configs {
 		address := rawURL(cfg)
 		occurrences[address]++
 		// The URL can contain credentials. Only include its host and a digest
@@ -316,7 +316,8 @@ func newTargets[C any](kind string, configs []C, rawURL func(C) string, open fun
 		}
 		id := fmt.Sprintf("%s:%s:%x:%d", kind, host, sha256.Sum256([]byte(address)), occurrences[address])
 		targets = append(targets, processor.Target{
-			ID: id,
+			ID:          id,
+			StatusLabel: fmt.Sprintf("%s-%d", kind, i+1),
 			Open: func() (autoscan.Target, error) {
 				return open(cfg)
 			},

@@ -26,8 +26,9 @@ type Config struct {
 // Target identifies a configured destination across restarts. Open can contact
 // the server to initialize a client, so the target worker calls it.
 type Target struct {
-	ID   string
-	Open func() (autoscan.Target, error)
+	ID          string
+	StatusLabel string
+	Open        func() (autoscan.Target, error)
 }
 
 // TargetStatus reports persisted delivery and retry state for a target.
@@ -64,6 +65,9 @@ type Processor struct {
 	targets    []Target
 	store      *datastore
 	processed  atomic.Int64
+
+	anchorMu    sync.Mutex
+	anchorProbe *anchorProbe
 }
 
 func (p *Processor) Add(scans ...autoscan.Scan) error {
@@ -76,10 +80,6 @@ func (p *Processor) ScansRemaining() (int, error) {
 
 func (p *Processor) ScansProcessed() int64 {
 	return p.processed.Load()
-}
-
-func (p *Processor) TargetStatuses() ([]TargetStatus, error) {
-	return p.store.targetStatuses()
 }
 
 // Run starts one worker for each target and waits for them to exit.

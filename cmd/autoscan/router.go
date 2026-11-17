@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -40,13 +42,15 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 	// Health check
 	r.Get("/health", healthHandler)
 
-	// HTTP-Triggers
-	r.Route("/triggers", func(r chi.Router) {
-		// Use Basic Auth middleware if username and password are set.
+	protected := r.Group(func(r chi.Router) {
 		if c.Auth.Username != "" && c.Auth.Password != "" {
 			r.Use(middleware.BasicAuth("Autoscan 1.x", map[string]string{c.Auth.Username: c.Auth.Password}))
 		}
+	})
+	protected.Get("/status", processorStatusHandler(proc))
 
+	// HTTP-Triggers
+	protected.Route("/triggers", func(r chi.Router) {
 		// Mixed-style Manual HTTP-trigger
 		r.Route("/manual", func(r chi.Router) {
 			trigger, err := manual.New(c.Triggers.Manual)
@@ -83,4 +87,21 @@ func addTriggers[C any](r chi.Router, proc *processor.Processor, configs []C, na
 // Other Handlers
 func healthHandler(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusOK)
+}
+
+func processorStatusHandler(proc *processor.Processor) http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		status := proc.Status(ctx)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.Header().Set("Cache-Control", "no-store")
+		if !status.CanDeliver {
+			rw.WriteHeader(http.StatusServiceUnavailable)
+		}
+		if err := json.NewEncoder(rw).Encode(status); err != nil {
+			hlog.FromRequest(r).Debug().Err(err).Msg("Failed writing processor status")
+		}
+	}
 }
