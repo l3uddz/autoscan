@@ -164,6 +164,64 @@ func TestMissingAnchorPausesAllTargets(t *testing.T) {
 	})
 }
 
+func TestHungAnchorCheckPausesDeliveryUntilItFinishes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		first, second := &fakeTarget{}, &fakeTarget{}
+		anchor := filepath.Join(t.TempDir(), "mount.anchor")
+		if err := os.WriteFile(anchor, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		proc := testProcessorWithConfig(t, Config{
+			Anchors: []string{anchor},
+			Targets: []Target{connectedTarget("first", first), connectedTarget("second", second)},
+		})
+		if err := proc.Add(autoscan.Scan{Folder: "queued", Time: time.Now().Add(-time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+		hung := hangAnchorCheck(proc)
+		defer startProcessor(t, proc)()
+
+		time.Sleep(anchorTimeout + 2*pollInterval)
+		synctest.Wait()
+		assertDelivered(t, first)
+		assertDelivered(t, second)
+		proc.anchorMu.Lock()
+		shared := proc.anchorProbe == hung
+		proc.anchorMu.Unlock()
+		if !shared {
+			t.Fatal("a second anchor check started while one was running")
+		}
+
+		finishAnchorCheck(proc, hung)
+		time.Sleep(pollInterval)
+		synctest.Wait()
+		assertDelivered(t, first, "queued")
+		assertDelivered(t, second, "queued")
+	})
+}
+
+func TestHungAnchorCheckDoesNotBlockShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{}
+		proc := testProcessorWithConfig(t, Config{
+			Anchors: []string{filepath.Join(t.TempDir(), "mount.anchor")},
+			Targets: []Target{connectedTarget("plex", target)},
+		})
+		if err := proc.Add(autoscan.Scan{Folder: "queued", Time: time.Now().Add(-time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+		hangAnchorCheck(proc)
+		stop := startProcessor(t, proc)
+
+		start := time.Now()
+		stop()
+		if waited := time.Since(start); waited != 0 {
+			t.Errorf("Run returned after %v, want no wait for the anchor check", waited)
+		}
+		assertDelivered(t, target)
+	})
+}
+
 func TestTargetRetriesStayAtOneHour(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		target := &fakeTarget{err: autoscan.ErrFatal}
@@ -196,6 +254,24 @@ func startProcessor(t *testing.T, proc *Processor) func() {
 		cancel()
 		<-done
 	}
+}
+
+// hangAnchorCheck makes the shared anchor check look like an os.Stat call
+// that blocks on a hung mount.
+func hangAnchorCheck(proc *Processor) *anchorProbe {
+	hung := &anchorProbe{done: make(chan struct{})}
+	proc.anchorMu.Lock()
+	proc.anchorProbe = hung
+	proc.anchorMu.Unlock()
+	return hung
+}
+
+// finishAnchorCheck ends a hung check the same way as probeAnchors.
+func finishAnchorCheck(proc *Processor, hung *anchorProbe) {
+	proc.anchorMu.Lock()
+	proc.anchorProbe = nil
+	proc.anchorMu.Unlock()
+	close(hung.done)
 }
 
 func connectedTarget(id string, target autoscan.Target) Target {

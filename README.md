@@ -308,6 +308,9 @@ Assume that you did not change an anchor file and the file is missing.
 Then the remote mount is offline or the software has a problem.
 
 If an anchor file is not available, the processor stops its operations until the file is available again.
+A hung network mount can make the anchor check wait without end.
+If the check does not finish within 10 seconds, the processor treats the anchor file as unavailable and tries again later.
+All targets and `GET /status` share one anchor check, so only one check at a time waits on a hung mount.
 
 If you merge multiple remote mounts with a tool such as [UnionFS](https://unionfs.filesystems.org) or [MergerFS](https://github.com/trapexit/mergerfs), use different anchor file names.
 Each remote mount MUST have its own anchor file and its own name for that anchor file.

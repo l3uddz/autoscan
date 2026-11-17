@@ -18,7 +18,10 @@ type targetWorker struct {
 
 func (p *Processor) runTarget(ctx context.Context, target *targetWorker) {
 	for ctx.Err() == nil {
-		delay, err := p.deliver(target)
+		delay, err := p.deliver(ctx, target)
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			log.Error().Err(err).Str("target", target.ID).Msg("Scan delivery paused")
 			delay = pollInterval
@@ -33,7 +36,7 @@ func (p *Processor) runTarget(ctx context.Context, target *targetWorker) {
 	}
 }
 
-func (p *Processor) deliver(target *targetWorker) (time.Duration, error) {
+func (p *Processor) deliver(ctx context.Context, target *targetWorker) (time.Duration, error) {
 	retry, err := p.store.retry(target.ID)
 	if err != nil {
 		return 0, err
@@ -46,7 +49,7 @@ func (p *Processor) deliver(target *targetWorker) (time.Duration, error) {
 			return p.retryTarget(target, retry.delay, err)
 		}
 	}
-	return p.deliverScan(target, retry.delay)
+	return p.deliverScan(ctx, target, retry.delay)
 }
 
 func (target *targetWorker) connect() error {
@@ -61,7 +64,7 @@ func (target *targetWorker) connect() error {
 	return nil
 }
 
-func (p *Processor) deliverScan(target *targetWorker, retryDelay time.Duration) (time.Duration, error) {
+func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retryDelay time.Duration) (time.Duration, error) {
 	scan, err := p.store.GetAvailableScan(target.ID, time.Now().Add(-p.minimumAge))
 	if errors.Is(err, autoscan.ErrNoScans) {
 		if retryDelay > 0 {
@@ -72,7 +75,7 @@ func (p *Processor) deliverScan(target *targetWorker, retryDelay time.Duration) 
 	if err != nil {
 		return 0, err
 	}
-	if err := p.checkAnchors(); err != nil {
+	if err := p.waitForAnchors(ctx); err != nil {
 		return 0, err
 	}
 	if err := target.client.Scan(scan.Scan); err != nil {
