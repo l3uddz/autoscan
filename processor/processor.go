@@ -26,8 +26,9 @@ type Config struct {
 // Target identifies a configured destination across restarts. Open can contact
 // the server to initialize a client, so the target worker calls it.
 type Target struct {
-	ID   string
-	Open func() (autoscan.Target, error)
+	ID          string
+	StatusLabel string
+	Open        func() (autoscan.Target, error)
 }
 
 // TargetStatus reports persisted delivery and retry state for a target.

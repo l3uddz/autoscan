@@ -359,6 +359,31 @@ At the interval that `scan-stats` sets, Autoscan prints this information:
 - Scans processed
 - Scans remaining
 
+### Processor status
+
+`GET /health` returns HTTP 200 when the HTTP server responds.
+Use `GET /status` to inspect scan delivery.
+If `authentication` sets both a username and a password, use the same Basic authentication as the webhooks for `/status`.
+
+`GET /status` returns JSON with these fields.
+
+| Field | Meaning |
+| --- | --- |
+| `can_deliver` | `true` if no shared blocker exists and at least one target has no scheduled retry. |
+| `blockers` | Reasons that affect all targets. Values include `anchor_unavailable`, `database_unavailable`, and `no_targets`. |
+| `oldest_pending_scan_age_seconds` | Age of the oldest queued scan in whole seconds, or `null` if the queue is empty or unavailable. |
+| `targets` | The status of each configured target. This list is empty if the database is unavailable. |
+
+Each target has an `id`, a `pending` scan count, a `last_error`, and a `next_retry` time.
+The `id` uses the target type and its position in that type's configuration list. For example, `plex-1` identifies the first Plex target.
+`last_error` is a fixed message for the latest failure, or an empty string when the target has no retry state.
+`next_retry` is a UTC timestamp, or `null` when no retry is scheduled.
+A shared blocker can delay delivery past that time.
+The response excludes raw target errors, credentials, and file paths.
+
+The endpoint returns HTTP 200 when `can_deliver` is `true` and HTTP 503 otherwise.
+If every target is retrying, the endpoint returns HTTP 503 with an empty `blockers` list unless a shared blocker also exists.
+
 ## Targets
 
 Targets are the final destination of Scans.

@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -114,12 +115,17 @@ func (store *datastore) completeDelivery(target string, scan queuedScan) (int64,
 	return count, tx.Commit()
 }
 
-func (store *datastore) targetStatuses() ([]TargetStatus, error) {
-	rows, err := store.db.Query(`
+const sqlTargetStatuses = `
 		SELECT id, last_error, next_retry,
 			(SELECT COUNT(*) FROM scan_delivery WHERE target = scan_target.id)
 		FROM scan_target ORDER BY id
-	`)
+`
+
+func (store *datastore) targetStatuses() ([]TargetStatus, error) {
+	return readTargetStatuses(store.db.Query(sqlTargetStatuses))
+}
+
+func readTargetStatuses(rows *sql.Rows, err error) ([]TargetStatus, error) {
 	if err != nil {
 		return nil, err
 	}
