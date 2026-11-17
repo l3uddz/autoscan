@@ -289,6 +289,8 @@ The default value is 10 minutes.
 
 After all files are older than the minimum age, the processor calls all configured targets in parallel.
 Each target gets a request to scan the folder.
+If a trigger adds a new event for the folder during delivery, the processor keeps it queued for a follow-up scan.
+The `minimum-age` delay starts again from the new event's timestamp.
 
 ### Anchor files
 

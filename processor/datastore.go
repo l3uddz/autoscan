@@ -18,6 +18,11 @@ type datastore struct {
 	db *sql.DB
 }
 
+type queuedScan struct {
+	autoscan.Scan
+	revision string
+}
+
 var (
 	//go:embed migrations
 	migrations embed.FS
@@ -33,11 +38,12 @@ func newDatastore(db *sql.DB, mg *migrate.Migrator) (*datastore, error) {
 }
 
 const sqlUpsert = `
-INSERT INTO scan (folder, priority, time)
-VALUES (?, ?, ?)
+INSERT INTO scan (folder, priority, time, revision)
+VALUES (?, ?, ?, hex(randomblob(16)))
 ON CONFLICT (folder) DO UPDATE SET
 	priority = MAX(excluded.priority, scan.priority),
-	time = excluded.time
+	time = excluded.time,
+	revision = excluded.revision
 `
 
 func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
@@ -79,17 +85,17 @@ func (store *datastore) GetScansRemaining() (int, error) {
 }
 
 const sqlGetAvailableScan = `
-SELECT folder, priority, time FROM scan
+SELECT folder, priority, time, revision FROM scan
 WHERE time < ?
 ORDER BY priority DESC, time ASC
 LIMIT 1
 `
 
-func (store *datastore) GetAvailableScan(minAge time.Duration) (autoscan.Scan, error) {
+func (store *datastore) GetAvailableScan(minAge time.Duration) (queuedScan, error) {
 	row := store.db.QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
 
-	scan := autoscan.Scan{}
-	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+	var scan queuedScan
+	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time, &scan.revision)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return scan, autoscan.ErrNoScans
@@ -125,11 +131,11 @@ func (store *datastore) GetAll() (scans []autoscan.Scan, err error) {
 }
 
 const sqlDelete = `
-DELETE FROM scan WHERE folder=?
+DELETE FROM scan WHERE folder = ? AND revision = ?
 `
 
-func (store *datastore) Delete(scan autoscan.Scan) error {
-	_, err := store.db.Exec(sqlDelete, scan.Folder)
+func (store *datastore) Delete(scan queuedScan) error {
+	_, err := store.db.Exec(sqlDelete, scan.Folder, scan.revision)
 	if err != nil {
 		return fmt.Errorf("delete: %s: %w", err, autoscan.ErrFatal)
 	}
