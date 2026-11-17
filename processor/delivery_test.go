@@ -200,6 +200,22 @@ func TestHungAnchorCheckPausesDeliveryUntilItFinishes(t *testing.T) {
 	})
 }
 
+func TestHungAnchorCheckTimesOut(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		proc := testProcessorWithConfig(t, Config{Anchors: []string{filepath.Join(t.TempDir(), "mount.anchor")}})
+		hangAnchorCheck(proc)
+
+		start := time.Now()
+		err := proc.waitForAnchors(t.Context())
+		if waited := time.Since(start); waited != anchorTimeout {
+			t.Errorf("waitForAnchors waited %v, want %v", waited, anchorTimeout)
+		}
+		if !errors.Is(err, autoscan.ErrAnchorUnavailable) {
+			t.Fatalf("waitForAnchors error = %v, want %v", err, autoscan.ErrAnchorUnavailable)
+		}
+	})
+}
+
 func TestHungAnchorCheckDoesNotBlockShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		target := &fakeTarget{}
