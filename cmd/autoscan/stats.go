@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/processor"
 )
 
@@ -17,22 +15,16 @@ func scanStats(proc *processor.Processor, interval time.Duration) {
 	for range st.C {
 		// retrieve amount of scans remaining
 		sm, err := proc.ScansRemaining()
-		switch {
-		case err == nil:
-			log.Info().
-				Int("remaining", sm).
-				Int64("processed", proc.ScansProcessed()).
-				Msg("Scan stats")
-		case errors.Is(err, autoscan.ErrFatal):
-			log.Error().
-				Err(err).
-				Msg("Fatal error determining amount of remaining scans, scan stats stopped...")
-			return
-		default:
-			// ErrNoScans should never occur as COUNT should always at-least return 0
+		if err != nil {
 			log.Error().
 				Err(err).
 				Msg("Failed determining amount of remaining scans")
+			continue
 		}
+
+		log.Info().
+			Int("remaining", sm).
+			Int64("processed", proc.ScansProcessed()).
+			Msg("Scan stats")
 	}
 }

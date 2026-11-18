@@ -6,22 +6,17 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/oriser/regroup"
 	"modernc.org/sqlite"
 )
 
 type Migrator struct {
 	db  *sql.DB
 	dir string
-
-	re *regroup.ReGroup
 }
 
 /* Credits to https://github.com/Boostport/migration */
 
 func New(db *sql.DB, dir string) (*Migrator, error) {
-	var err error
-
 	m := &Migrator{
 		db:  db,
 		dir: dir,
@@ -33,14 +28,8 @@ func New(db *sql.DB, dir string) (*Migrator, error) {
 	}
 
 	// verify schema
-	if err = m.verify(); err != nil {
+	if err := m.verify(); err != nil {
 		return nil, fmt.Errorf("verify: %w", err)
-	}
-
-	// compile migration regexp
-	m.re, err = regroup.Compile(`(?P<Version>\d+)\w?(?P<Name>.+)?\.sql`)
-	if err != nil {
-		return nil, fmt.Errorf("regexp: %w", err)
 	}
 
 	return m, nil

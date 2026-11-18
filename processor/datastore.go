@@ -63,12 +63,10 @@ func (store *datastore) Upsert(scans []autoscan.Scan) error {
 		return err
 	}
 
+	defer tx.Rollback()
+
 	for _, scan := range scans {
 		if err = store.upsert(tx, scan); err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				return fmt.Errorf("%w (rollback: %w)", err, rollbackErr)
-			}
-
 			return err
 		}
 	}
@@ -84,7 +82,7 @@ func (store *datastore) GetScansRemaining() (int, error) {
 	// COUNT always returns one row.
 	remaining := 0
 	if err := row.Scan(&remaining); err != nil {
-		return remaining, fmt.Errorf("get remaining scans: %v: %w", err, autoscan.ErrFatal)
+		return remaining, fmt.Errorf("get remaining scans: %w", err)
 	}
 
 	return remaining, nil

@@ -16,9 +16,19 @@ var (
 	errFakeRollback = errors.New("rollback failed")
 )
 
+// txCalls records which transaction methods ran.
+type txCalls struct {
+	committed  bool
+	rolledBack bool
+}
+
 // failingConnector opens connections on which every statement fails.
-// Rollback returns rollbackErr.
-type failingConnector struct{ rollbackErr error }
+// Rollback returns rollbackErr. Both connections and transactions record
+// their calls in calls.
+type failingConnector struct {
+	rollbackErr error
+	calls       *txCalls
+}
 
 func (c failingConnector) Connect(context.Context) (driver.Conn, error) {
 	return failingConn(c), nil
@@ -38,14 +48,20 @@ func (c failingConn) Begin() (driver.Tx, error)         { return failingTx(c), n
 
 type failingTx failingConnector
 
-func (failingTx) Commit() error     { return nil }
-func (t failingTx) Rollback() error { return t.rollbackErr }
+func (t failingTx) Commit() error {
+	t.calls.committed = true
+	return nil
+}
+
+func (t failingTx) Rollback() error {
+	t.calls.rolledBack = true
+	return t.rollbackErr
+}
 
 func TestUpsertInsertFailure(t *testing.T) {
 	type Test struct {
-		Name         string
-		RollbackErr  error
-		WantRollback bool
+		Name        string
+		RollbackErr error
 	}
 
 	var testCases = []Test{
@@ -53,15 +69,15 @@ func TestUpsertInsertFailure(t *testing.T) {
 			Name: "Returns the insert error when the rollback succeeds",
 		},
 		{
-			Name:         "Returns the insert and rollback errors when the rollback fails",
-			RollbackErr:  errFakeRollback,
-			WantRollback: true,
+			Name:        "Returns the insert error when the rollback fails",
+			RollbackErr: errFakeRollback,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			db := sql.OpenDB(failingConnector{rollbackErr: tc.RollbackErr})
+			calls := &txCalls{}
+			db := sql.OpenDB(failingConnector{rollbackErr: tc.RollbackErr, calls: calls})
 			defer db.Close()
 
 			store := &datastore{db: db}
@@ -72,8 +88,12 @@ func TestUpsertInsertFailure(t *testing.T) {
 				t.Errorf("Got error %v, want the insert error", err)
 			}
 
-			if got := errors.Is(err, errFakeRollback); got != tc.WantRollback {
-				t.Errorf("Got error %v, want the rollback error: %v", err, tc.WantRollback)
+			if calls.committed {
+				t.Error("Upsert committed the transaction after the insert failed")
+			}
+
+			if !calls.rolledBack {
+				t.Error("Upsert did not roll back the transaction after the insert failed")
 			}
 		})
 	}

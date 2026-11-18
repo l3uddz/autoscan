@@ -3,16 +3,31 @@ package migrate
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
-	"path/filepath"
+	"path"
+	"regexp"
 	"sort"
+	"strconv"
 )
 
 type migration struct {
-	Version  int    `regroup:"Version"`
-	Name     string `regroup:"Name"`
+	Version  int
 	Filename string
 	Schema   string
+}
+
+// migrationName matches a migration file name and captures its version.
+var migrationName = regexp.MustCompile(`(?P<Version>\d+)\w?(?P<Name>.+)?\.sql`)
+
+// migrationVersion returns the version in a migration file name.
+func migrationVersion(name string) (int, error) {
+	match := migrationName.FindStringSubmatch(name)
+	if match == nil {
+		return 0, errors.New("no match found for given string")
+	}
+
+	return strconv.Atoi(match[migrationName.SubexpIndex("Version")])
 }
 
 func (m *Migrator) verify() error {
@@ -98,20 +113,22 @@ func (m *Migrator) parse(fs *embed.FS) ([]*migration, error) {
 		}
 
 		// parse migration
-		md := new(migration)
-		if err := m.re.MatchToTarget(f.Name(), md); err != nil {
+		version, err := migrationVersion(f.Name())
+		if err != nil {
 			return nil, fmt.Errorf("parse migration: %w", err)
 		}
 
-		b, err := fs.ReadFile(filepath.Join(m.dir, f.Name()))
+		b, err := fs.ReadFile(path.Join(m.dir, f.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read migration: %w", err)
 		}
-		md.Schema = string(b)
-		md.Filename = f.Name()
 
 		// set migration
-		migrations = append(migrations, md)
+		migrations = append(migrations, &migration{
+			Version:  version,
+			Filename: f.Name(),
+			Schema:   string(b),
+		})
 	}
 
 	// sort migrations
