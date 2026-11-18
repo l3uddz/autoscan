@@ -127,6 +127,9 @@ A Scan is a folder path with a priority.
 Autoscan supports these triggers:
 
 - Inotify: This trigger listens for changes on the file system. \
+  If a new directory appears in a watched path, for example because you moved it there, the trigger watches it. \
+  If the new directory or one of its subdirectories contains a file, the trigger also scans the new directory. \
+  An empty new directory gets no scan. \
   It keeps pending scans in memory until the processor accepts them. \
   The retry delay starts at one second and doubles after each failed retry, up to one minute. \
   Do not use this trigger on top of RClone mounts. \
