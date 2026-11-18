@@ -175,6 +175,81 @@ func TestDecodeJSONReturnsDecodeError(t *testing.T) {
 	}
 }
 
+// jsonString returns a JSON string value that is exactly n bytes long.
+func jsonString(n int) string {
+	return `"` + strings.Repeat("a", n-2) + `"`
+}
+
+func TestDecodeJSONBodyLimit(t *testing.T) {
+	t.Run("Decodes a body at the limit", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(jsonString(maxBodyBytes)))
+		var v string
+		if err := DecodeJSON(r, &v); err != nil {
+			t.Fatalf("DecodeJSON returned %v, want nil", err)
+		}
+		if len(v) != maxBodyBytes-2 {
+			t.Errorf("Decoded %d bytes, want %d", len(v), maxBodyBytes-2)
+		}
+	})
+
+	t.Run("Decodes a small value with a tail at the limit", func(t *testing.T) {
+		body := "{}" + strings.Repeat(" ", maxBodyBytes-2)
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		var v struct{}
+		if err := DecodeJSON(r, &v); err != nil {
+			t.Fatalf("DecodeJSON returned %v, want nil", err)
+		}
+	})
+
+	oversized := []struct {
+		Name string
+		Body string
+	}{
+		{Name: "Fails on a value above the limit", Body: jsonString(maxBodyBytes + 1)},
+		{Name: "Fails on a small value with a tail above the limit", Body: "{}" + strings.Repeat(" ", maxBodyBytes-1)},
+	}
+
+	for _, tc := range oversized {
+		t.Run(tc.Name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.Body))
+			var v any
+			err := DecodeJSON(r, &v)
+
+			var maxBytesErr *http.MaxBytesError
+			if !errors.As(err, &maxBytesErr) {
+				t.Fatalf("DecodeJSON returned %v, want an *http.MaxBytesError", err)
+			}
+			if maxBytesErr.Limit != maxBodyBytes {
+				t.Errorf("Limit = %d, want %d", maxBytesErr.Limit, maxBodyBytes)
+			}
+		})
+	}
+}
+
+func TestHandlerRejectsOversizedBody(t *testing.T) {
+	parse := func(r *http.Request) (Event, error) {
+		var v string
+		return Event{Type: "Download", Folders: []string{"/data/tv"}}, DecodeJSON(r, &v)
+	}
+	trigger, err := New(Config{}, parse, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callback := func(...autoscan.Scan) error {
+		t.Error("Handler sent scans to the processor for an oversized body")
+		return nil
+	}
+
+	body := strings.NewReader(jsonString(maxBodyBytes + 1))
+	rec := httptest.NewRecorder()
+	trigger(callback).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", body))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestFileEvent(t *testing.T) {
 	files := []File{{Path: "/music/Artist/Album/CD 01/01.flac"}, {Path: "/music/Artist/Album/CD 02/01.flac"}}
 

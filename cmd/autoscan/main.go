@@ -71,6 +71,20 @@ type config struct {
 	} `yaml:"targets"`
 }
 
+// Limits for the HTTP server. They stop a client that holds a connection
+// open by sending request headers slowly. The server has no full-request
+// read or write timeout, so a slow request body or a slow response still
+// works.
+const (
+	// readHeaderTimeout is the time to read the headers of a request.
+	readHeaderTimeout = 10 * time.Second
+
+	// idleTimeout is the time to wait for the next request on a keep-alive
+	// connection. Without it, the server waits with no limit for the first
+	// bytes of the next request, before readHeaderTimeout starts.
+	idleTimeout = 2 * time.Minute
+)
+
 var (
 	// release variables
 	Version   string
@@ -256,7 +270,13 @@ func main() {
 			}
 
 			log.Info().Msgf("Starting server on %s", addr)
-			if err := http.ListenAndServe(addr, router); err != nil {
+			srv := &http.Server{
+				Addr:              addr,
+				Handler:           router,
+				ReadHeaderTimeout: readHeaderTimeout,
+				IdleTimeout:       idleTimeout,
+			}
+			if err := srv.ListenAndServe(); err != nil {
 				log.Fatal().
 					Str("addr", addr).
 					Err(err).

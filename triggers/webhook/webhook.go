@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"path"
 	"strings"
@@ -160,10 +161,24 @@ func (h handler) scans(folders []string) []autoscan.Scan {
 	return scans
 }
 
+// maxBodyBytes is the largest webhook body that DecodeJSON reads.
+// Real -arr payloads are a few kilobytes. A rename of a large series is
+// far larger, so the limit leaves a wide margin.
+const maxBodyBytes = 10 << 20 // 10 MiB
+
 // DecodeJSON decodes the JSON body of r into v and logs v at trace level.
+// If the body is larger than maxBodyBytes, DecodeJSON returns an error that
+// wraps *http.MaxBytesError.
 func DecodeJSON(r *http.Request, v any) error {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	body := http.MaxBytesReader(nil, r.Body, maxBodyBytes)
+	if err := json.NewDecoder(body).Decode(v); err != nil {
 		return fmt.Errorf("decoding request: %w", err)
+	}
+
+	// Decode stops after the first JSON value. Read the rest, so that a
+	// small value with a large tail also fails.
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return fmt.Errorf("reading request: %w", err)
 	}
 
 	hlog.FromRequest(r).Trace().Interface("event", v).Msg("Received JSON body")
