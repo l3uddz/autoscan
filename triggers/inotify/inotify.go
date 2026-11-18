@@ -166,6 +166,21 @@ func isWithin(name, root string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// watchTree watches every directory in the tree at root. It reports whether
+// the walk saw a file, which is any entry that is not a directory.
+func (d *daemon) watchTree(root string) (bool, error) {
+	hasFile := false
+	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+		if err == nil && !fi.IsDir() {
+			hasFile = true
+		}
+
+		return d.walkFunc(path, fi, err)
+	})
+
+	return hasFile, err
+}
+
 func (d *daemon) worker() {
 	// close watcher
 	defer d.watcher.Close()
@@ -174,68 +189,10 @@ func (d *daemon) worker() {
 	for {
 		select {
 		case event := <-d.watcher.Events:
-			// new filesystem event
-			d.log.Trace().
-				Interface("event", event).
-				Msg("Filesystem event")
-
-			switch {
-			case event.Op&fsnotify.Create == fsnotify.Create:
-				// create
-				fi, err := os.Stat(event.Name)
-				if err != nil {
-					d.log.Error().
-						Err(err).
-						Str("path", event.Name).
-						Msg("Failed retrieving filesystem info")
-					continue
-				}
-
-				// watch new directories
-				if fi.IsDir() {
-					if err := filepath.Walk(event.Name, d.walkFunc); err != nil {
-						d.log.Error().
-							Err(err).
-							Str("path", event.Name).
-							Msg("Failed watching new directory")
-					}
-
-					continue
-				}
-
-			case event.Op&fsnotify.Rename == fsnotify.Rename, event.Op&fsnotify.Remove == fsnotify.Remove:
-				// renamed / removed
-			default:
-				// ignore this event
-				continue
+			if name, ok := d.scanPath(event); ok {
+				// move to queue
+				d.queue.inputs <- name
 			}
-
-			// get path object
-			p, err := d.getPathObject(event.Name)
-			if err != nil {
-				d.log.Error().
-					Err(err).
-					Str("path", event.Name).
-					Msg("Failed determining path object")
-				continue
-			}
-
-			// rewrite
-			rewritten := p.Rewriter(event.Name)
-
-			// filter
-			if !p.Allowed(rewritten) {
-				continue
-			}
-
-			// get directory where path has an extension
-			if filepath.Ext(rewritten) != "" {
-				// there was most likely a file extension, use the directory
-				rewritten = filepath.Dir(rewritten)
-			}
-
-			// move to queue
-			d.queue.inputs <- rewritten
 
 		case err := <-d.watcher.Errors:
 			d.log.Error().
@@ -243,6 +200,79 @@ func (d *daemon) worker() {
 				Msg("Failed receiving filesystem events")
 		}
 	}
+}
+
+// scanPath handles a filesystem event. It returns the path to scan and
+// reports whether the event needs a scan.
+func (d *daemon) scanPath(event fsnotify.Event) (string, bool) {
+	// new filesystem event
+	d.log.Trace().
+		Interface("event", event).
+		Msg("Filesystem event")
+
+	isDir := false
+
+	switch {
+	case event.Op&fsnotify.Create == fsnotify.Create:
+		// create
+		fi, err := os.Stat(event.Name)
+		if err != nil {
+			d.log.Error().
+				Err(err).
+				Str("path", event.Name).
+				Msg("Failed retrieving filesystem info")
+			return "", false
+		}
+
+		// watch new directories and scan them only if they contain a file
+		if fi.IsDir() {
+			hasFile, err := d.watchTree(event.Name)
+			if err != nil {
+				d.log.Error().
+					Err(err).
+					Str("path", event.Name).
+					Msg("Failed watching new directory")
+			}
+
+			if !hasFile {
+				return "", false
+			}
+
+			isDir = true
+		}
+
+	case event.Op&fsnotify.Rename == fsnotify.Rename, event.Op&fsnotify.Remove == fsnotify.Remove:
+		// renamed / removed
+	default:
+		// ignore this event
+		return "", false
+	}
+
+	// get path object
+	p, err := d.getPathObject(event.Name)
+	if err != nil {
+		d.log.Error().
+			Err(err).
+			Str("path", event.Name).
+			Msg("Failed determining path object")
+		return "", false
+	}
+
+	// rewrite
+	rewritten := p.Rewriter(event.Name)
+
+	// filter
+	if !p.Allowed(rewritten) {
+		return "", false
+	}
+
+	// get directory where path has an extension
+	if !isDir && filepath.Ext(rewritten) != "" {
+		// there was most likely a file extension, use the directory
+		rewritten = filepath.Dir(rewritten)
+	}
+
+	return rewritten, true
 }
 
 const (
