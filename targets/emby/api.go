@@ -38,7 +38,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 
 	if err := autoscan.ResponseError(res, "invalid emby token"); err != nil {
 		c.log.Trace().
-			Stringer("request_url", res.Request.URL).
+			Str("request_url", res.Request.URL.Redacted()).
 			Int("response_status", res.StatusCode).
 			Msg("Request failed")
 

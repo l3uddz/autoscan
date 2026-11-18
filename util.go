@@ -25,6 +25,26 @@ func TargetRequestError(err, cause error) error {
 	return fmt.Errorf("%v: %w", err, cause)
 }
 
+// RedactURL returns raw for a log line. It replaces the user password with
+// "xxxxx" and removes the secretParams query parameters, which carry tokens.
+// If raw is not a valid URL, RedactURL returns "invalid url".
+func RedactURL(raw string, secretParams ...string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid url"
+	}
+
+	if len(secretParams) > 0 {
+		q := u.Query()
+		for _, p := range secretParams {
+			q.Del(p)
+		}
+		u.RawQuery = q.Encode()
+	}
+
+	return u.Redacted()
+}
+
 // BodyError wraps an error from reading or decoding a target response body.
 // A timeout means that the target is unavailable, so the processor retries.
 // Any other error is fatal.

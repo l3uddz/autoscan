@@ -79,6 +79,52 @@ func TestTargetRequestErrorOmitsURL(t *testing.T) {
 	}
 }
 
+func TestRedactURL(t *testing.T) {
+	type Test struct {
+		Name         string
+		Raw          string
+		SecretParams []string
+		Want         string
+	}
+
+	var testCases = []Test{
+		{
+			Name: "Password",
+			Raw:  "http://user:secret@example.invalid:8080/path",
+			Want: "http://user:xxxxx@example.invalid:8080/path",
+		},
+		{
+			Name: "No userinfo",
+			Raw:  "http://example.invalid/path?b=2&a=1",
+			Want: "http://example.invalid/path?b=2&a=1",
+		},
+		{
+			Name: "Username only",
+			Raw:  "http://user@example.invalid",
+			Want: "http://user@example.invalid",
+		},
+		{
+			Name: "Invalid URL",
+			Raw:  "http://user:secret@example.invalid:port",
+			Want: "invalid url",
+		},
+		{
+			Name:         "Secret parameter",
+			Raw:          "http://user:secret@example.invalid/path?ApiKey=token&path=%2Fmnt",
+			SecretParams: []string{"ApiKey"},
+			Want:         "http://user:xxxxx@example.invalid/path?path=%2Fmnt",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			if got := RedactURL(tc.Raw, tc.SecretParams...); got != tc.Want {
+				t.Errorf("RedactURL(%q) = %q, want %q", tc.Raw, got, tc.Want)
+			}
+		})
+	}
+}
+
 func TestBodyError(t *testing.T) {
 	type Test struct {
 		Name string
