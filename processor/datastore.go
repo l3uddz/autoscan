@@ -84,7 +84,7 @@ func (store *datastore) GetScansRemaining() (int, error) {
 	// COUNT always returns one row.
 	remaining := 0
 	if err := row.Scan(&remaining); err != nil {
-		return remaining, fmt.Errorf("get remaining scans: %v: %w", err, autoscan.ErrFatal)
+		return remaining, fmt.Errorf("get remaining scans: %w", err)
 	}
 
 	return remaining, nil
