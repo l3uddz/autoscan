@@ -209,6 +209,15 @@ If you select a different event in Sonarr, Radarr, Readarr, or Lidarr, for examp
 We do not know for certain that these three events cover all possible file system changes.
 For now, keep using Bernard or the Inotify trigger to get all scans.
 
+#### Request limits
+
+Autoscan reads at most 10 MiB of a Sonarr, Radarr, Readarr, or Lidarr webhook body.
+If the JSON event in the body is larger than 10 MiB, Autoscan responds with 400 Bad Request and does not start a scan.
+Normal -arr events are much smaller than this limit.
+
+The Autoscan web server also closes a connection if a client does not send the request headers within 10 seconds.
+It closes an idle keep-alive connection after 2 minutes.
+
 ### Configuration
 
 This part of the `config.yml` file shows the possible configuration of the triggers.
