@@ -192,19 +192,38 @@ func TestDecodeJSONBodyLimit(t *testing.T) {
 		}
 	})
 
-	t.Run("Fails on a body above the limit", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(jsonString(maxBodyBytes+1)))
-		var v string
-		err := DecodeJSON(r, &v)
-
-		var maxBytesErr *http.MaxBytesError
-		if !errors.As(err, &maxBytesErr) {
-			t.Fatalf("DecodeJSON returned %v, want an *http.MaxBytesError", err)
-		}
-		if maxBytesErr.Limit != maxBodyBytes {
-			t.Errorf("Limit = %d, want %d", maxBytesErr.Limit, maxBodyBytes)
+	t.Run("Decodes a small value with a tail at the limit", func(t *testing.T) {
+		body := "{}" + strings.Repeat(" ", maxBodyBytes-2)
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		var v struct{}
+		if err := DecodeJSON(r, &v); err != nil {
+			t.Fatalf("DecodeJSON returned %v, want nil", err)
 		}
 	})
+
+	oversized := []struct {
+		Name string
+		Body string
+	}{
+		{Name: "Fails on a value above the limit", Body: jsonString(maxBodyBytes + 1)},
+		{Name: "Fails on a small value with a tail above the limit", Body: "{}" + strings.Repeat(" ", maxBodyBytes-1)},
+	}
+
+	for _, tc := range oversized {
+		t.Run(tc.Name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.Body))
+			var v any
+			err := DecodeJSON(r, &v)
+
+			var maxBytesErr *http.MaxBytesError
+			if !errors.As(err, &maxBytesErr) {
+				t.Fatalf("DecodeJSON returned %v, want an *http.MaxBytesError", err)
+			}
+			if maxBytesErr.Limit != maxBodyBytes {
+				t.Errorf("Limit = %d, want %d", maxBytesErr.Limit, maxBodyBytes)
+			}
+		})
+	}
 }
 
 func TestHandlerRejectsOversizedBody(t *testing.T) {
