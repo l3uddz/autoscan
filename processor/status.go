@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -113,23 +114,14 @@ func (store *datastore) queueStatus(ctx context.Context) ([]TargetStatus, *time.
 }
 
 func oldestPendingScan(ctx context.Context, tx *sql.Tx) (*time.Time, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT time FROM scan`)
+	// The datastore stores scan times in UTC, so the text order is time order.
+	var oldest time.Time
+	err := tx.QueryRowContext(ctx, `SELECT time FROM scan ORDER BY time LIMIT 1`).Scan(&oldest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	// SQLite stores the timestamp as text. Compare the decoded times because
-	// timestamps with different UTC offsets can sort in a different order.
-	var oldest *time.Time
-	for rows.Next() {
-		var stamp time.Time
-		if err := rows.Scan(&stamp); err != nil {
-			return nil, err
-		}
-		if oldest == nil || stamp.Before(*oldest) {
-			oldest = &stamp
-		}
-	}
-	return oldest, rows.Err()
+	return &oldest, nil
 }
