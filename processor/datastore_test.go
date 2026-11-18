@@ -336,3 +336,134 @@ func TestQueuedScansSurviveAStartupWithoutTargets(t *testing.T) {
 		t.Fatalf("new target's pending scan = %+v, %v, want %+v, nil", queued.Scan, err, scan)
 	}
 }
+
+func TestGetAvailableScanComparesTimesAcrossOffsets(t *testing.T) {
+	plusOne := time.FixedZone("+01", 3600)
+	minusOne := time.FixedZone("-01", -3600)
+
+	testCases := []struct {
+		Name       string
+		GiveScans  []autoscan.Scan
+		OlderThan  time.Time
+		WantFolder string
+	}{
+		{
+			Name:       "Returns a scan older than a cutoff with another offset",
+			GiveScans:  []autoscan.Scan{{Folder: "old", Time: time.Date(2026, 10, 25, 1, 30, 0, 0, plusOne)}},
+			OlderThan:  time.Date(2026, 10, 25, 1, 15, 0, 0, time.UTC),
+			WantFolder: "old",
+		},
+		{
+			Name:      "Keeps a scan younger than a cutoff with another offset",
+			GiveScans: []autoscan.Scan{{Folder: "young", Time: time.Date(2026, 10, 25, 1, 10, 0, 0, minusOne)}},
+			OlderThan: time.Date(2026, 10, 25, 1, 15, 0, 0, time.UTC),
+		},
+		{
+			Name:       "Returns a UTC scan older than a cutoff in another zone",
+			GiveScans:  []autoscan.Scan{{Folder: "old", Time: time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC)}},
+			OlderThan:  time.Date(2026, 10, 25, 1, 15, 0, 0, minusOne),
+			WantFolder: "old",
+		},
+		{
+			Name: "Returns the oldest scan first across offsets",
+			GiveScans: []autoscan.Scan{
+				{Folder: "later", Time: time.Date(2026, 10, 25, 1, 20, 0, 0, time.UTC)},
+				{Folder: "earlier", Time: time.Date(2026, 10, 25, 2, 10, 0, 0, plusOne)},
+			},
+			OlderThan:  time.Date(2026, 10, 25, 2, 0, 0, 0, time.UTC),
+			WantFolder: "earlier",
+		},
+		{
+			Name: "Returns a fractional second before the next whole second",
+			GiveScans: []autoscan.Scan{
+				{Folder: "whole", Time: time.Date(2026, 10, 25, 1, 0, 1, 0, time.UTC)},
+				{Folder: "fraction", Time: time.Date(2026, 10, 25, 1, 0, 0, 500_000_000, time.UTC)},
+			},
+			OlderThan:  time.Date(2026, 10, 25, 2, 0, 0, 0, time.UTC),
+			WantFolder: "fraction",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			store := getDatastore(t)
+			if err := store.Upsert(tc.GiveScans); err != nil {
+				t.Fatal(err)
+			}
+
+			scan, err := store.GetAvailableScan("target", tc.OlderThan)
+			if tc.WantFolder == "" {
+				if !errors.Is(err, autoscan.ErrNoScans) {
+					t.Fatalf("available scan = %+v, %v, want %v", scan.Scan, err, autoscan.ErrNoScans)
+				}
+				return
+			}
+			if err != nil || scan.Folder != tc.WantFolder {
+				t.Fatalf("available scan = %+v, %v, want folder %q", scan.Scan, err, tc.WantFolder)
+			}
+		})
+	}
+}
+
+func TestStartupStoresEarlierScanTimesInUTC(t *testing.T) {
+	store := getDatastore(t)
+	legacy := []struct {
+		Folder   string
+		Stored   string
+		WantText string
+		WantTime time.Time
+	}{
+		{"bst", "2026-10-25 01:30:00 +0100 BST", "2026-10-25 00:30:00 +0000 UTC", time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC)},
+		{"monotonic", "2026-10-25 01:20:00.5 +0100 BST m=+0.002558546", "2026-10-25 00:20:00.5 +0000 UTC", time.Date(2026, 10, 25, 0, 20, 0, 500_000_000, time.UTC)},
+		{"mattn", "2026-10-25 01:10:00+01:00", "2026-10-25 00:10:00 +0000 UTC", time.Date(2026, 10, 25, 0, 10, 0, 0, time.UTC)},
+		{"utc", "2026-10-25 00:40:00 +0000 UTC", "2026-10-25 00:40:00 +0000 UTC", time.Date(2026, 10, 25, 0, 40, 0, 0, time.UTC)},
+	}
+	for _, row := range legacy {
+		if _, err := store.db.Exec(`INSERT INTO scan (folder, priority, time) VALUES (?, 0, ?)`, row.Folder, row.Stored); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.db.Exec(`INSERT INTO scan_delivery (target, folder) VALUES ('target', ?)`, row.Folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mg, err := migrate.New(store.db, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store, err = newDatastore(store.db, mg); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, row := range legacy {
+		var text string
+		if err := store.db.QueryRow(`SELECT CAST(time AS TEXT) FROM scan WHERE folder = ?`, row.Folder).Scan(&text); err != nil {
+			t.Fatal(err)
+		}
+		if text != row.WantText {
+			t.Errorf("%s: stored time = %q, want %q", row.Folder, text, row.WantText)
+		}
+		scan, err := store.GetScan(row.Folder)
+		if err != nil || !scan.Time.Equal(row.WantTime) {
+			t.Errorf("%s: scanned time = %v, %v, want %v", row.Folder, scan.Time, err, row.WantTime)
+		}
+	}
+
+	var delivered []string
+	for {
+		scan, err := store.GetAvailableScan("target", time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC))
+		if errors.Is(err, autoscan.ErrNoScans) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.completeDelivery("target", scan); err != nil {
+			t.Fatal(err)
+		}
+		delivered = append(delivered, scan.Folder)
+	}
+	if want := []string{"mattn", "monotonic", "bst", "utc"}; !reflect.DeepEqual(delivered, want) {
+		t.Errorf("delivery order = %v, want %v", delivered, want)
+	}
+}

@@ -34,7 +34,56 @@ func newDatastore(db *sql.DB, mg *migrate.Migrator) (*datastore, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	return &datastore{db: db}, nil
+	store := &datastore{db: db}
+	if err := store.storeScanTimesInUTC(); err != nil {
+		return nil, fmt.Errorf("store scan times in UTC: %w", err)
+	}
+	return store, nil
+}
+
+// The driver stores a time as text, and SQL compares and sorts that text.
+// The text follows time order only when every time uses the same offset, so
+// the datastore stores and compares scan times in UTC.
+const storedUTCSuffix = " +0000 UTC"
+
+// storeScanTimesInUTC rewrites the scan times that earlier releases stored
+// with the UTC offset of the local zone.
+func (store *datastore) storeScanTimesInUTC() error {
+	tx, err := store.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT folder, time FROM scan WHERE time NOT LIKE ?`, "%"+storedUTCSuffix)
+	if err != nil {
+		return err
+	}
+	var scans []autoscan.Scan
+	for rows.Next() {
+		var scan autoscan.Scan
+		if err := rows.Scan(&scan.Folder, &scan.Time); err != nil {
+			rows.Close()
+			return err
+		}
+		scans = append(scans, scan)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	// Close the rows before the updates, because the connection pool can
+	// have only one connection.
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, scan := range scans {
+		if _, err := tx.Exec(`UPDATE scan SET time = ? WHERE folder = ?`, scan.Time.UTC(), scan.Folder); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 const sqlUpsert = `
@@ -47,7 +96,7 @@ ON CONFLICT (folder) DO UPDATE SET
 `
 
 func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
-	if _, err := tx.Exec(sqlUpsert, scan.Folder, scan.Priority, scan.Time); err != nil {
+	if _, err := tx.Exec(sqlUpsert, scan.Folder, scan.Priority, scan.Time.UTC()); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`
@@ -97,7 +146,7 @@ LIMIT 1
 `
 
 func (store *datastore) GetAvailableScan(target string, olderThan time.Time) (queuedScan, error) {
-	row := store.db.QueryRow(sqlGetAvailableScan, target, olderThan)
+	row := store.db.QueryRow(sqlGetAvailableScan, target, olderThan.UTC())
 
 	var scan queuedScan
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time, &scan.revision)
