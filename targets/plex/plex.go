@@ -29,7 +29,7 @@ type target struct {
 func New(c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "plex").
-		Str("url", c.URL).Logger()
+		Str("url", autoscan.RedactURL(c.URL)).Logger()
 
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {

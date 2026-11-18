@@ -15,7 +15,7 @@ type Config struct {
 func New(c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "emby").
-		Str("url", c.URL).
+		Str("url", autoscan.RedactURL(c.URL)).
 		Logger()
 
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)

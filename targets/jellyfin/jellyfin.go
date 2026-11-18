@@ -1,8 +1,6 @@
 package jellyfin
 
 import (
-	"net/url"
-
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/targets/internal/media"
 )
@@ -17,7 +15,7 @@ type Config struct {
 func New(c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "jellyfin").
-		Str("url", redactConfigURL(c.URL)).
+		Str("url", autoscan.RedactURL(c.URL, apiKeyParam)).
 		Logger()
 
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
@@ -37,14 +35,4 @@ func New(c Config) (autoscan.Target, error) {
 		Msg("Retrieved libraries")
 
 	return media.NewPathTarget(l, rewriter, libraries, api), nil
-}
-
-// redactConfigURL returns the configured URL without the user password.
-func redactConfigURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "invalid url"
-	}
-
-	return redactURL(u)
 }
