@@ -74,3 +74,60 @@ func TestShutdownStopsWaitingForProcessorAtDeadline(t *testing.T) {
 		t.Fatal("shutdown waited past its deadline for the processor")
 	}
 }
+
+func TestShutdownStopsEveryServerWhileOneWaits(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	slow := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+	})}
+	slowListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go slow.Serve(slowListener)
+
+	other := &http.Server{Handler: http.NotFoundHandler()}
+	otherListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go other.Serve(otherListener)
+
+	go func() {
+		if res, err := http.Get("http://" + slowListener.Addr().String()); err == nil {
+			res.Body.Close()
+		}
+	}()
+	<-started
+
+	processorDone := make(chan struct{})
+	close(processorDone)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	shutdownDone := make(chan struct{})
+	go func() {
+		shutdown(ctx, []*http.Server{slow, other}, processorDone)
+		close(shutdownDone)
+	}()
+	defer func() {
+		close(release)
+		<-shutdownDone
+	}()
+
+	// The second server stops accepting connections while the first still
+	// waits for its open request.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.Dial("tcp", otherListener.Addr().String())
+		if err != nil {
+			return
+		}
+		conn.Close()
+		if time.Now().After(deadline) {
+			t.Fatal("the second server still accepts connections while the first waits")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

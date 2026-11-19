@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -263,17 +264,22 @@ func main() {
 	log.Info().Msg("Stopped")
 }
 
-// shutdown stops the servers after their open requests finish, and then
-// waits for the processor to stop. It waits at most until ctx ends.
+// shutdown stops all servers at the same time, so no server accepts new
+// requests while another waits for its open requests. Then it waits for the
+// processor to stop. It waits at most until ctx ends.
 func shutdown(ctx context.Context, servers []*http.Server, processorDone <-chan struct{}) {
+	var stopped sync.WaitGroup
 	for _, srv := range servers {
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Warn().
-				Str("addr", srv.Addr).
-				Err(err).
-				Msg("Failed stopping web server")
-		}
+		stopped.Go(func() {
+			if err := srv.Shutdown(ctx); err != nil {
+				log.Warn().
+					Str("addr", srv.Addr).
+					Err(err).
+					Msg("Failed stopping web server")
+			}
+		})
 	}
+	stopped.Wait()
 
 	select {
 	case <-processorDone:
