@@ -285,3 +285,33 @@ func TestRenamedRootReleasesSubdirectoryWatches(t *testing.T) {
 		}
 	}
 }
+
+func TestRenamedAncestorLosesNestedRoot(t *testing.T) {
+	parent := t.TempDir()
+	media := filepath.Join(parent, "media")
+	show := filepath.Join(media, "tv", "Show")
+	mkdirAll(t, show)
+	trigger := newTestTrigger(t, media, show)
+	trigger.watchPath(trigger.paths[0])
+	trigger.watchPath(trigger.paths[1])
+
+	// Moving media/tv out of media loses the root media/tv/Show, but not media.
+	rename(t, filepath.Join(media, "tv"), filepath.Join(parent, "tv"))
+	waitFor(t, 2*time.Second, "the nested root to be not watched", func() bool {
+		select {
+		case event := <-trigger.watcher.Events:
+			trigger.rewatchLostRoot(event)
+		case <-time.After(10 * time.Millisecond):
+		}
+		return !trigger.paths[1].watching.Load()
+	})
+
+	if !trigger.paths[0].watching.Load() {
+		t.Error("The root above the moved directory is marked as not watched")
+	}
+	for _, name := range trigger.watcher.WatchList() {
+		if isWithin(name, filepath.Join(media, "tv")) {
+			t.Errorf("Watch %q below the moved directory remains", name)
+		}
+	}
+}

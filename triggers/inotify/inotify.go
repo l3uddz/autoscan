@@ -293,17 +293,19 @@ func (t *Trigger) worker() {
 	}
 }
 
-// rewatchLostRoot handles the removal or rename of a watched root. The root
-// then has no watch, so the trigger marks it as not watched and tries again
-// to watch it, until the path exists again. A configured root below the lost
-// root is lost too.
+// rewatchLostRoot handles the removal or rename of a watched root, or of a
+// directory above one. The root then has no watch, so the trigger marks it as
+// not watched and tries again to watch it, until the path exists again.
 func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
 	if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 		return
 	}
 
+	// The lost directory can be a root or a directory above a root. A
+	// rename of a directory moves its whole tree, but the kernel sends no
+	// event for the roots below it.
 	lost := filepath.Clean(event.Name)
-	if !slices.ContainsFunc(t.paths, func(p *path) bool { return filepath.Clean(p.Path) == lost }) {
+	if !slices.ContainsFunc(t.paths, func(p *path) bool { return isWithin(filepath.Clean(p.Path), lost) }) {
 		return
 	}
 
