@@ -6,16 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	userConfigDirFunc = os.UserConfigDir
-	warnConfigDirOnce sync.Once
-)
+var userConfigDirFunc = os.UserConfigDir
 
 // applyDefaultPaths sets each empty path to a file in the default config
 // directory. It resolves that directory only if a path is empty, because
@@ -56,13 +52,9 @@ func defaultConfigDirectory(app string, filename string) string {
 			return acd
 		}
 
-		warnConfigDirOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "autoscan: failed ensuring config directory %s: %v\n", acd, mkErr)
-		})
+		fmt.Fprintf(os.Stderr, "autoscan: failed ensuring config directory %s: %v\n", acd, mkErr)
 	} else if err != nil {
-		warnConfigDirOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "autoscan: unable to determine user config directory: %v\n", err)
-		})
+		fmt.Fprintf(os.Stderr, "autoscan: unable to determine user config directory: %v\n", err)
 	}
 
 	return bcd

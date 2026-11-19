@@ -4,13 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 )
 
 func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
 	binDir := setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	configRoot := filepath.Join(t.TempDir(), "user-config")
 	stubUserConfigDir(t, func() (string, error) {
@@ -34,7 +32,6 @@ func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
 
 func TestDefaultConfigDirectoryFallsBackWhenUserConfigDirUnavailable(t *testing.T) {
 	expected := setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	stubUserConfigDir(t, func() (string, error) {
 		return "", errors.New("missing home")
@@ -48,7 +45,6 @@ func TestDefaultConfigDirectoryFallsBackWhenUserConfigDirUnavailable(t *testing.
 
 func TestDefaultConfigDirectoryFallsBackWhenConfigDirCannotBeCreated(t *testing.T) {
 	expected := setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	tempFile := filepath.Join(t.TempDir(), "config-root")
 	if err := os.WriteFile(tempFile, []byte("x"), 0o644); err != nil {
@@ -81,7 +77,6 @@ func TestApplyDefaultPathsSkipsConfigDirWhenAllPathsSet(t *testing.T) {
 
 func TestApplyDefaultPathsFillsOnlyEmptyPaths(t *testing.T) {
 	setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	configRoot := filepath.Join(t.TempDir(), "user-config")
 	stubUserConfigDir(t, func() (string, error) {
