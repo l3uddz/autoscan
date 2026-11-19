@@ -2,7 +2,7 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-FROM alpine:3.20 AS rootfs
+FROM alpine:3.24 AS rootfs
 RUN apk add --no-cache ca-certificates tzdata
 
 FROM scratch
