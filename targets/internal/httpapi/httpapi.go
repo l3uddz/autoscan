@@ -65,7 +65,12 @@ func New(c Config) *Client {
 // endpoint is relative to the base URL. If query is not nil, it replaces
 // the query of the request URL.
 func (c *Client) Send(method string, endpoint string, query url.Values) error {
-	res, err := c.do(method, endpoint, query, nil, "")
+	req, err := c.newRequest(method, endpoint, query, nil)
+	if err != nil {
+		return err
+	}
+
+	res, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -83,7 +88,13 @@ func (c *Client) PostJSON(endpoint string, v any) error {
 		return fmt.Errorf("encoding request body: %w", err)
 	}
 
-	res, err := c.do(http.MethodPost, endpoint, nil, bytes.NewReader(b), "application/json")
+	req, err := c.newRequest(http.MethodPost, endpoint, nil, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -94,7 +105,12 @@ func (c *Client) PostJSON(endpoint string, v any) error {
 
 // GetJSON sends a GET request and decodes the JSON response body into v.
 func (c *Client) GetJSON(endpoint string, v any) error {
-	res, err := c.do(http.MethodGet, endpoint, nil, nil, "")
+	req, err := c.newRequest(http.MethodGet, endpoint, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	res, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -107,9 +123,9 @@ func (c *Client) GetJSON(endpoint string, v any) error {
 	return nil
 }
 
-// do sends a request and returns the response for a 2xx status.
-// The caller closes the response body.
-func (c *Client) do(method string, endpoint string, query url.Values, body io.Reader, contentType string) (*http.Response, error) {
+// newRequest returns a request for endpoint, which is relative to the base
+// URL. If query is not nil, it replaces the query of the request URL.
+func (c *Client) newRequest(method string, endpoint string, query url.Values, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequest(method, joinURL(c.config.BaseURL, endpoint), body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
@@ -118,9 +134,13 @@ func (c *Client) do(method string, endpoint string, query url.Values, body io.Re
 	if query != nil {
 		req.URL.RawQuery = query.Encode()
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
+
+	return req, nil
+}
+
+// do prepares and sends req, and returns the response for a 2xx status.
+// The caller closes the response body.
+func (c *Client) do(req *http.Request) (*http.Response, error) {
 	if c.config.Prepare != nil {
 		c.config.Prepare(req)
 	}
