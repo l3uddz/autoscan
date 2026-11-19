@@ -70,22 +70,26 @@ func (c *Client) Send(method string, endpoint string, query url.Values) error {
 		return err
 	}
 
-	return res.Body.Close()
+	// The server accepted the request, so a failed close does not fail it.
+	res.Body.Close()
+	return nil
 }
 
-// SendJSON sends v as the JSON body of a request and closes the response body.
-func (c *Client) SendJSON(method string, endpoint string, v any) error {
+// PostJSON sends v as the JSON body of a POST request and closes the
+// response body.
+func (c *Client) PostJSON(endpoint string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("encoding request body: %w", err)
 	}
 
-	res, err := c.do(method, endpoint, nil, bytes.NewReader(b), "application/json")
+	res, err := c.do(http.MethodPost, endpoint, nil, bytes.NewReader(b), "application/json")
 	if err != nil {
 		return err
 	}
 
-	return res.Body.Close()
+	res.Body.Close()
+	return nil
 }
 
 // GetJSON sends a GET request and decodes the JSON response body into v.

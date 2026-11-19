@@ -2,7 +2,6 @@
 package media
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -65,7 +64,7 @@ func SendUpdated(c *httpapi.Client, path string, updateType string) error {
 		Updates: []update{{Path: path, UpdateType: updateType}},
 	}
 
-	return c.SendJSON(http.MethodPost, "Library/Media/Updated", payload)
+	return c.PostJSON("Library/Media/Updated", payload)
 }
 
 // A PathAPI is a media server client whose scan request takes only a path.
