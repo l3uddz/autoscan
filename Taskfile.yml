@@ -23,7 +23,7 @@ tasks:
       - go test ./... -cover -v -race ${GO_PACKAGES}
 
   lint:
-    desc: Go format and vet checks
+    desc: Go format, vet, and staticcheck checks
     cmds:
       # gofmt -l exits 0 even when it lists files, so fail on any output.
       # Only tracked files are checked, because vendor/ is not gofmt clean.
@@ -35,6 +35,7 @@ tasks:
           exit 1
         fi
       - go vet ./...
+      - go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 
   vendor:
     desc: Go vendor
