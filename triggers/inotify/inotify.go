@@ -170,6 +170,9 @@ func (t *Trigger) watchTree(root string) (bool, error) {
 	hasFile := false
 	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
 		if err == nil && !fi.IsDir() {
+			if path == root {
+				return fmt.Errorf("%v: not a directory", path)
+			}
 			hasFile = true
 			return nil
 		}
@@ -244,6 +247,7 @@ func (t *Trigger) worker() {
 	for {
 		select {
 		case event := <-t.watcher.Events:
+			t.rewatchLostRoot(event)
 			if name, ok := t.scanPath(event); ok {
 				// move to queue
 				t.queue.inputs <- name
@@ -254,6 +258,26 @@ func (t *Trigger) worker() {
 				Err(err).
 				Msg("Failed receiving filesystem events")
 		}
+	}
+}
+
+// rewatchLostRoot handles the removal or rename of a watched root. The root
+// then has no watch, so the trigger marks it as not watched and tries again
+// to watch it, until the path exists again.
+func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
+	if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
+		return
+	}
+
+	for _, p := range t.paths {
+		if filepath.Clean(p.Path) != filepath.Clean(event.Name) || !p.watching.CompareAndSwap(true, false) {
+			continue
+		}
+
+		t.log.Warn().
+			Str("path", p.Path).
+			Msg("Watched path was removed, watching it again when it exists")
+		go t.watchPath(p)
 	}
 }
 

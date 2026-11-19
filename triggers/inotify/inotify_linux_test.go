@@ -213,3 +213,50 @@ func TestStatusCountsWatchedPaths(t *testing.T) {
 		t.Errorf("Status = %+v, want %+v", got, want)
 	}
 }
+
+func TestWatchTreeFailsForFileRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "file")
+	writeFile(t, root)
+	trigger := newTestTrigger(t, root)
+
+	if _, err := trigger.watchTree(root); err == nil {
+		t.Error("watchTree returned no error for a root that is a file")
+	}
+}
+
+func TestRemovedRootIsWatchedAgain(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "media")
+	mkdirAll(t, root)
+	trigger := newTestTrigger(t, root)
+	trigger.watchPath(trigger.paths[0])
+
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "the removed root to be not watched", func() bool {
+		select {
+		case event := <-trigger.watcher.Events:
+			trigger.rewatchLostRoot(event)
+		case <-time.After(10 * time.Millisecond):
+		}
+		return trigger.Status().Watching == 0
+	})
+
+	mkdirAll(t, root)
+	waitFor(t, 2*watchRetryMin, "the recreated root to be watched", func() bool {
+		return trigger.Status().Watching == 1
+	})
+	assertWatched(t, trigger, root)
+}
+
+func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for !done() {
+		if time.Now().After(deadline) {
+			t.Fatalf("Timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

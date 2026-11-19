@@ -131,7 +131,7 @@ Autoscan supports these triggers:
   If the new directory or one of its subdirectories contains a file, the trigger also scans the new directory. \
   An empty new directory gets no scan. \
   It keeps pending scans in memory until the processor accepts them. \
-  Each watched path starts on its own. If a path is missing or Autoscan cannot watch it, Autoscan logs an error and tries again. The delay starts at 5 seconds and doubles after each failure, up to 5 minutes. The other paths continue. \
+  Each watched path starts on its own. If a path is missing or Autoscan cannot watch it, Autoscan logs an error and tries again. The delay starts at 5 seconds and doubles after each failure, up to 5 minutes. The other paths continue. If a watched path is removed or renamed later, Autoscan tries again in the same way until the path exists. \
   If Autoscan cannot read or watch a directory below a watched path, it logs a warning and skips that directory. \
   If a watched path is a mount point, mount it before Autoscan starts. Autoscan cannot see that the mount came up later, because it already watches the empty directory below the mount. \
   The retry delay starts at one second and doubles after each failed retry, up to one minute. \
