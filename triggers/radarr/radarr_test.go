@@ -113,6 +113,28 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Rename Event with previous paths",
+			Given{
+				Config:  standardConfig,
+				Fixture: "testdata/rename_previous.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   "/mnt/unionfs/Media/Movies/Deadpool (2016)",
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   "/mnt/unionfs/Media/Movies/Deadpool",
+						Priority: 5,
+						Time:     currentTime,
+					},
+				},
+			},
+		},
+		{
 			"Returns bad request on invalid JSON",
 			Given{
 				Config:  standardConfig,

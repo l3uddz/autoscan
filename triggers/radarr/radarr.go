@@ -28,6 +28,10 @@ type radarrEvent struct {
 	Movie struct {
 		FolderPath string
 	} `json:"movie"`
+
+	RenamedFiles []struct {
+		PreviousPath string
+	} `json:"renamedMovieFiles"`
 }
 
 func parse(r *http.Request) (webhook.Event, error) {
@@ -46,12 +50,25 @@ func parse(r *http.Request) (webhook.Event, error) {
 
 		event.Folders = []string{path.Dir(path.Join(e.Movie.FolderPath, e.File.RelativePath))}
 
-	case strings.EqualFold(e.Type, "MovieDelete"), strings.EqualFold(e.Type, "Rename"):
+	case strings.EqualFold(e.Type, "MovieDelete"):
 		if e.Movie.FolderPath == "" {
 			return event, webhook.ErrMissingFields
 		}
 
 		event.Folders = []string{e.Movie.FolderPath}
+
+	// Scan the movie folder and the old folder of each renamed file.
+	// Older Radarr releases send no renamed files. The handler removes
+	// duplicate folders.
+	case strings.EqualFold(e.Type, "Rename"):
+		if e.Movie.FolderPath == "" {
+			return event, webhook.ErrMissingFields
+		}
+
+		event.Folders = []string{e.Movie.FolderPath}
+		for _, renamed := range e.RenamedFiles {
+			event.Folders = append(event.Folders, path.Dir(renamed.PreviousPath))
+		}
 	}
 
 	// Other events, such as Test or Grab, have no folders to scan.
