@@ -46,7 +46,12 @@ func TestRetryCapsDelay(t *testing.T) {
 }
 
 func TestRootLostDuringSetupIsWatchedAgain(t *testing.T) {
-	trigger := &Trigger{log: zerolog.Nop(), paths: []*path{{Path: "/mnt/tv"}}}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = watcher.Close() })
+	trigger := &Trigger{log: zerolog.Nop(), watcher: watcher, paths: []*path{{Path: "/mnt/tv"}}}
 	p := trigger.paths[0]
 
 	// The walk starts, then the root is removed before the walk marks the

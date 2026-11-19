@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -294,14 +295,30 @@ func (t *Trigger) worker() {
 
 // rewatchLostRoot handles the removal or rename of a watched root. The root
 // then has no watch, so the trigger marks it as not watched and tries again
-// to watch it, until the path exists again.
+// to watch it, until the path exists again. A configured root below the lost
+// root is lost too.
 func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
 	if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 		return
 	}
 
+	lost := filepath.Clean(event.Name)
+	if !slices.ContainsFunc(t.paths, func(p *path) bool { return filepath.Clean(p.Path) == lost }) {
+		return
+	}
+
+	// After a rename, the subdirectories keep their own watches, on the
+	// moved tree. Remove them, so that the next walk of the path does not
+	// add a second watch for each directory. The kernel already removed the
+	// watches of a deleted tree, so errors do not matter.
+	for _, name := range t.watcher.WatchList() {
+		if isWithin(name, lost) {
+			_ = t.watcher.Remove(name)
+		}
+	}
+
 	for _, p := range t.paths {
-		if filepath.Clean(p.Path) != filepath.Clean(event.Name) {
+		if !isWithin(filepath.Clean(p.Path), lost) {
 			continue
 		}
 

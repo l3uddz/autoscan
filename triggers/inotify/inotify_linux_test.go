@@ -260,3 +260,28 @@ func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool)
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestRenamedRootReleasesSubdirectoryWatches(t *testing.T) {
+	parent := t.TempDir()
+	root, nested := filepath.Join(parent, "media"), filepath.Join(parent, "media", "tv")
+	mkdirAll(t, filepath.Join(nested, "Show"))
+	trigger := newTestTrigger(t, root, nested)
+	trigger.watchPath(trigger.paths[0])
+	trigger.watchPath(trigger.paths[1])
+
+	rename(t, root, filepath.Join(parent, "media.old"))
+	waitFor(t, 2*time.Second, "the renamed root to be not watched", func() bool {
+		select {
+		case event := <-trigger.watcher.Events:
+			trigger.rewatchLostRoot(event)
+		case <-time.After(10 * time.Millisecond):
+		}
+		return trigger.Status().Watching == 0
+	})
+
+	for _, name := range trigger.watcher.WatchList() {
+		if isWithin(name, root) {
+			t.Errorf("Watch %q below the renamed root remains", name)
+		}
+	}
+}
