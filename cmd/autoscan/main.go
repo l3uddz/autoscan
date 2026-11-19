@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -83,6 +86,11 @@ const (
 	// bytes of the next request, before readHeaderTimeout starts.
 	idleTimeout = 2 * time.Minute
 )
+
+// shutdownTimeout limits how long autoscan waits for open requests and
+// deliveries after a stop signal. Docker sends SIGKILL 10 seconds after
+// SIGTERM by default. A delivery that does not finish stays queued.
+const shutdownTimeout = 8 * time.Second
 
 var (
 	// release variables
@@ -191,6 +199,11 @@ func main() {
 		log.Warn().Msg("Webhooks running without authentication")
 	}
 
+	// Catch stop signals only after startup. Before this point, a stop
+	// signal ends autoscan at once, for example while it waits for config.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// daemon triggers
 	for _, t := range c.Triggers.Inotify {
 		run, err := inotify.New(t, proc.Add)
@@ -212,7 +225,7 @@ func main() {
 			Msg("Failed initialising trigger")
 	}
 
-	startServers(c.Host, c.Port, router)
+	servers := startServers(c.Host, c.Port, router)
 	logConfigured(c)
 
 	// scan stats
@@ -225,15 +238,48 @@ func main() {
 		Str("version", version).
 		Msg("Initialised")
 
-	// processor
-	log.Info().Msg("Processor started")
-
 	if len(targets) == 0 {
 		log.Warn().Msg("No targets initialised, processor stopped, triggers will continue...")
-		select {}
+	} else {
+		log.Info().Msg("Processor started")
 	}
 
-	proc.Run(context.Background())
+	processorDone := make(chan struct{})
+	go func() {
+		defer close(processorDone)
+		proc.Run(ctx)
+	}()
+
+	<-ctx.Done()
+	log.Info().Msg("Shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	shutdown(shutdownCtx, servers, processorDone)
+
+	if err := db.Close(); err != nil {
+		log.Error().Err(err).Msg("Failed closing datastore")
+	}
+	log.Info().Msg("Stopped")
+}
+
+// shutdown stops the servers after their open requests finish, and then
+// waits for the processor to stop. It waits at most until ctx ends.
+func shutdown(ctx context.Context, servers []*http.Server, processorDone <-chan struct{}) {
+	for _, srv := range servers {
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Warn().
+				Str("addr", srv.Addr).
+				Err(err).
+				Msg("Failed stopping web server")
+		}
+	}
+
+	select {
+	case <-processorDone:
+	case <-ctx.Done():
+		log.Warn().Msg("Processor did not stop in time, unfinished deliveries stay queued")
+	}
 }
 
 // newLogger returns a logger that writes to stderr and to the rotated log
@@ -263,24 +309,28 @@ func newLogger(path string, verbosity int) zerolog.Logger {
 	}
 }
 
-// startServers serves handler on each host in the background. A host
-// without a port uses port. Autoscan stops if a server fails.
-func startServers(hosts []string, port int, handler http.Handler) {
+// startServers serves handler on each host in the background and returns
+// the servers. A host without a port uses port. Autoscan stops if a server
+// fails.
+func startServers(hosts []string, port int, handler http.Handler) []*http.Server {
+	servers := make([]*http.Server, 0, len(hosts))
 	for _, host := range hosts {
 		addr := host
 		if !strings.Contains(addr, ":") {
 			addr = fmt.Sprintf("%s:%d", host, port)
 		}
 
+		srv := &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: readHeaderTimeout,
+			IdleTimeout:       idleTimeout,
+		}
+		servers = append(servers, srv)
+
 		go func() {
 			log.Info().Msgf("Starting server on %s", addr)
-			srv := &http.Server{
-				Addr:              addr,
-				Handler:           handler,
-				ReadHeaderTimeout: readHeaderTimeout,
-				IdleTimeout:       idleTimeout,
-			}
-			if err := srv.ListenAndServe(); err != nil {
+			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				log.Fatal().
 					Str("addr", addr).
 					Err(err).
@@ -288,6 +338,8 @@ func startServers(hosts []string, port int, handler http.Handler) {
 			}
 		}()
 	}
+
+	return servers
 }
 
 // logConfigured logs how many triggers and targets c configures.
