@@ -93,9 +93,8 @@ var (
 
 	// CLI
 	cli struct {
-		globals
+		Version kong.VersionFlag `help:"Print version information and quit"`
 
-		// flags
 		// An empty path means a file in the default config directory.
 		// applyDefaultPaths resolves it after parsing, so a set path never
 		// creates that directory.
@@ -106,25 +105,11 @@ var (
 	}
 )
 
-type globals struct {
-	Version versionFlag `name:"version" help:"Print version information and quit"`
-}
-
-type versionFlag string
-
-func (v versionFlag) Decode(ctx *kong.DecodeContext) error { return nil }
-func (v versionFlag) IsBool() bool                         { return true }
-func (v versionFlag) BeforeApply(app *kong.Kong, vars kong.Vars) error {
-	fmt.Println(vars["version"])
-	app.Exit(0)
-	return nil
-}
-
 func main() {
 	version := fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)
 
-	// parse cli
-	ctx := kong.Parse(&cli,
+	// parse cli. kong.Parse exits if the arguments are not valid.
+	kong.Parse(&cli,
 		kong.Name("autoscan"),
 		kong.Description("Scan media into target media servers"),
 		kong.UsageOnError(),
@@ -136,11 +121,6 @@ func main() {
 			"version": version,
 		},
 	)
-
-	if err := ctx.Validate(); err != nil {
-		fmt.Println("Failed parsing cli:", err)
-		os.Exit(1)
-	}
 
 	applyDefaultPaths(&cli.Config, &cli.Database, &cli.Log)
 
@@ -302,7 +282,7 @@ func main() {
 		Msg("Configured targets")
 
 	// scan stats
-	if c.ScanStats.Seconds() > 0 {
+	if c.ScanStats > 0 {
 		go scanStats(proc, c.ScanStats)
 	}
 
