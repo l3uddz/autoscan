@@ -30,7 +30,7 @@ func newTestList(t *testing.T, server *fakeServer) (*LibraryList, *time.Time) {
 		t.Fatal(err)
 	}
 	list.now = func() time.Time { return clock }
-	list.loadedAt = clock
+	list.attemptedAt = clock
 	return list, &clock
 }
 
@@ -102,6 +102,16 @@ func TestLibraryListReturnsReloadError(t *testing.T) {
 	*clock = clock.Add(minReloadInterval)
 	if _, err := list.Matching("/mnt/movies/Film"); !errors.Is(err, server.err) {
 		t.Errorf("Matching returned %v, want %v", err, server.err)
+	}
+
+	// A failed reload also starts the minimum interval. Until it ends, an
+	// unmatched folder gets the same error, so its scan stays queued.
+	*clock = clock.Add(time.Second)
+	if _, err := list.Matching("/mnt/other/Film"); !errors.Is(err, server.err) {
+		t.Errorf("Matching within the interval returned %v, want %v", err, server.err)
+	}
+	if server.loads != 2 {
+		t.Errorf("Loads = %d, want 2: the list reloaded within the minimum interval after a failure", server.loads)
 	}
 	if got, want := matchNames(t, list, "/mnt/tv/Show"), []string{"TV"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Matching after a failed reload = %v, want %v", got, want)

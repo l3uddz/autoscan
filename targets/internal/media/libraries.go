@@ -26,7 +26,10 @@ type LibraryList struct {
 	load      func() ([]Library, error)
 	now       func() time.Time
 	libraries []Library
-	loadedAt  time.Time
+
+	// attemptedAt is the time of the last load, and loadErr is its error.
+	attemptedAt time.Time
+	loadErr     error
 
 	// unmatched holds the time of the reload that each folder caused,
 	// for folders that matched no library after that reload.
@@ -50,16 +53,20 @@ func NewLibraryList(log zerolog.Logger, load func() ([]Library, error)) (*Librar
 }
 
 // Matching returns every library whose path contains folder. If no library
-// matches, Matching reloads the list and matches again, unless the list
-// loaded less than minReloadInterval ago or folder caused a reload less than
-// folderReloadInterval ago. It returns an error if the reload fails.
+// matches, Matching reloads the list and matches again, unless the last load
+// was less than minReloadInterval ago or folder caused a reload less than
+// folderReloadInterval ago. It returns an error if the reload fails, and it
+// returns the same error until the next reload can start.
 func (l *LibraryList) Matching(folder string) ([]Library, error) {
 	if libs := matching(l.libraries, folder); len(libs) > 0 {
 		return libs, nil
 	}
 
 	now := l.now()
-	if now.Sub(l.loadedAt) < minReloadInterval {
+	if now.Sub(l.attemptedAt) < minReloadInterval {
+		if l.loadErr != nil {
+			return nil, fmt.Errorf("reload libraries: %w", l.loadErr)
+		}
 		return nil, nil
 	}
 	if reloadedAt, ok := l.unmatched[folder]; ok && now.Sub(reloadedAt) < folderReloadInterval {
@@ -72,7 +79,7 @@ func (l *LibraryList) Matching(folder string) ([]Library, error) {
 
 	libs := matching(l.libraries, folder)
 	if len(libs) == 0 {
-		l.unmatched[folder] = l.loadedAt
+		l.unmatched[folder] = l.attemptedAt
 	}
 
 	return libs, nil
@@ -80,15 +87,16 @@ func (l *LibraryList) Matching(folder string) ([]Library, error) {
 
 // reload loads the libraries and removes the expired unmatched folders.
 func (l *LibraryList) reload() error {
+	l.attemptedAt = l.now()
 	libraries, err := l.load()
+	l.loadErr = err
 	if err != nil {
 		return err
 	}
 
 	l.libraries = libraries
-	l.loadedAt = l.now()
 	for folder, reloadedAt := range l.unmatched {
-		if l.loadedAt.Sub(reloadedAt) >= folderReloadInterval {
+		if l.attemptedAt.Sub(reloadedAt) >= folderReloadInterval {
 			delete(l.unmatched, folder)
 		}
 	}
