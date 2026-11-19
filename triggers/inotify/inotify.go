@@ -28,11 +28,10 @@ type Config struct {
 }
 
 type daemon struct {
-	callback autoscan.ProcessorFunc
-	paths    []path
-	watcher  *fsnotify.Watcher
-	queue    *queue
-	log      zerolog.Logger
+	paths   []path
+	watcher *fsnotify.Watcher
+	queue   *queue
+	log     zerolog.Logger
 }
 
 type path struct {
@@ -67,10 +66,9 @@ func New(c Config) (autoscan.Trigger, error) {
 
 	trigger := func(callback autoscan.ProcessorFunc) {
 		d := daemon{
-			log:      l,
-			callback: callback,
-			paths:    paths,
-			queue:    newQueue(callback, l, c.Priority),
+			log:   l,
+			paths: paths,
+			queue: newQueue(callback, l, c.Priority),
 		}
 
 		// start job(s)
