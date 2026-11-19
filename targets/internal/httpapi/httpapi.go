@@ -1,7 +1,7 @@
 // Package httpapi holds the HTTP client that the targets share.
-// The client maps transport errors and response statuses to the autoscan
-// errors that the processor uses, and it keeps credentials out of errors
-// and logs.
+// The client marks the errors that mean that a target is unavailable with
+// autoscan.ErrTargetUnavailable, and it keeps credentials out of errors and
+// logs.
 package httpapi
 
 import (
@@ -77,7 +77,7 @@ func (c *Client) Send(method string, endpoint string, query url.Values) error {
 func (c *Client) SendJSON(method string, endpoint string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("encoding request body: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("encoding request body: %w", err)
 	}
 
 	res, err := c.do(method, endpoint, nil, bytes.NewReader(b), "application/json")
@@ -108,7 +108,7 @@ func (c *Client) GetJSON(endpoint string, v any) error {
 func (c *Client) do(method string, endpoint string, query url.Values, body io.Reader, contentType string) (*http.Response, error) {
 	req, err := http.NewRequest(method, joinURL(c.config.BaseURL, endpoint), body)
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", requestError(err, autoscan.ErrFatal))
+		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
 	}
 
 	if query != nil {
@@ -123,7 +123,7 @@ func (c *Client) do(method string, endpoint string, query url.Values, body io.Re
 
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, requestError(err, autoscan.ErrTargetUnavailable)
+		return nil, fmt.Errorf("%w: %w", withoutURL(err), autoscan.ErrTargetUnavailable)
 	}
 
 	if err := responseError(res, c.config.AuthMessage); err != nil {
@@ -138,13 +138,14 @@ func (c *Client) do(method string, endpoint string, query url.Values, body io.Re
 	return res, nil
 }
 
-// requestError omits the request URL, which can contain credentials.
-func requestError(err, cause error) error {
+// withoutURL returns the cause of a *url.Error. The error then omits the
+// request URL, which can contain credentials.
+func withoutURL(err error) error {
 	var urlErr *url.Error
 	for errors.As(err, &urlErr) {
 		err = urlErr.Err
 	}
-	return fmt.Errorf("%v: %w", err, cause)
+	return err
 }
 
 // RedactURL returns raw for a log line. It replaces the user password with
@@ -168,23 +169,19 @@ func RedactURL(raw string, secretParams ...string) string {
 }
 
 // bodyError wraps an error from reading or decoding a response body.
-// A timeout means that the target is unavailable, so the processor retries.
-// Any other error is fatal.
+// A timeout means that the target is unavailable.
 func bodyError(msg string, err error) error {
-	sentinel := autoscan.ErrFatal
-
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		sentinel = autoscan.ErrTargetUnavailable
+		return fmt.Errorf("%s: %w: %w", msg, err, autoscan.ErrTargetUnavailable)
 	}
 
-	return fmt.Errorf("%s: %v: %w", msg, err, sentinel)
+	return fmt.Errorf("%s: %w", msg, err)
 }
 
 // responseError returns nil for a 2xx response. For any other status, it
-// closes the response body and returns an error. A 401 status is fatal, and
-// authMessage describes it. 404 and 5xx gateway errors mean that the target
-// is unavailable. Any other status is fatal.
+// closes the response body and returns an error. authMessage describes a 401
+// status. 404 and 5xx gateway errors mean that the target is unavailable.
 func responseError(res *http.Response, authMessage string) error {
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		return nil
@@ -194,12 +191,12 @@ func responseError(res *http.Response, authMessage string) error {
 
 	switch res.StatusCode {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("%s: %s: %w", authMessage, res.Status, autoscan.ErrFatal)
+		return fmt.Errorf("%s: %s", authMessage, res.Status)
 	case http.StatusNotFound, http.StatusInternalServerError, http.StatusBadGateway,
 		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
 	default:
-		return fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
+		return errors.New(res.Status)
 	}
 }
 

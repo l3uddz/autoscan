@@ -17,14 +17,14 @@ import (
 	"github.com/l3uddz/autoscan"
 )
 
-func TestRequestErrorOmitsURL(t *testing.T) {
+func TestWithoutURLOmitsURL(t *testing.T) {
 	requestErr := &url.Error{
 		Op:  "Get",
 		URL: "http://example.invalid/?token=example-token",
 		Err: os.ErrDeadlineExceeded,
 	}
-	err := requestError(requestErr, autoscan.ErrTargetUnavailable)
-	if !errors.Is(err, autoscan.ErrTargetUnavailable) || !strings.Contains(err.Error(), os.ErrDeadlineExceeded.Error()) {
+	err := withoutURL(requestErr)
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("error %q does not describe the timeout", err)
 	}
 	if strings.Contains(err.Error(), "example-token") {
@@ -80,29 +80,28 @@ func TestRedactURL(t *testing.T) {
 
 func TestBodyErrorClassifies(t *testing.T) {
 	type Test struct {
-		Name string
-		Err  error
-		Want error
+		Name        string
+		Err         error
+		Unavailable bool
 	}
 
 	var testCases = []Test{
 		{
-			Name: "Timeout is unavailable",
-			Err:  os.ErrDeadlineExceeded,
-			Want: autoscan.ErrTargetUnavailable,
+			Name:        "Timeout is unavailable",
+			Err:         os.ErrDeadlineExceeded,
+			Unavailable: true,
 		},
 		{
-			Name: "Invalid JSON is fatal",
+			Name: "Invalid JSON is not unavailable",
 			Err:  json.Unmarshal([]byte("{"), new(struct{})),
-			Want: autoscan.ErrFatal,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			err := bodyError("decoding response", tc.Err)
-			if !errors.Is(err, tc.Want) {
-				t.Errorf("Got error %v, want %v", err, tc.Want)
+			if !errors.Is(err, tc.Err) || errors.Is(err, autoscan.ErrTargetUnavailable) != tc.Unavailable {
+				t.Errorf("Got error %v, want it to wrap %v with unavailable=%v", err, tc.Err, tc.Unavailable)
 			}
 		})
 	}
@@ -110,21 +109,21 @@ func TestBodyErrorClassifies(t *testing.T) {
 
 func TestResponseErrorClassifies(t *testing.T) {
 	type Test struct {
-		Status int
-		Want   error
+		Status      int
+		Unavailable bool
 	}
 
 	var testCases = []Test{
-		{http.StatusOK, nil},
-		{http.StatusNoContent, nil},
-		{http.StatusUnauthorized, autoscan.ErrFatal},
-		{http.StatusForbidden, autoscan.ErrFatal},
-		{http.StatusNotFound, autoscan.ErrTargetUnavailable},
-		{http.StatusInternalServerError, autoscan.ErrTargetUnavailable},
-		{http.StatusBadGateway, autoscan.ErrTargetUnavailable},
-		{http.StatusServiceUnavailable, autoscan.ErrTargetUnavailable},
-		{http.StatusGatewayTimeout, autoscan.ErrTargetUnavailable},
-		{http.StatusNotImplemented, autoscan.ErrFatal},
+		{http.StatusOK, false},
+		{http.StatusNoContent, false},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
+		{http.StatusNotFound, true},
+		{http.StatusInternalServerError, true},
+		{http.StatusBadGateway, true},
+		{http.StatusServiceUnavailable, true},
+		{http.StatusGatewayTimeout, true},
+		{http.StatusNotImplemented, false},
 	}
 
 	for _, tc := range testCases {
@@ -133,15 +132,15 @@ func TestResponseErrorClassifies(t *testing.T) {
 			res := &http.Response{StatusCode: tc.Status, Status: http.StatusText(tc.Status), Body: body}
 
 			err := responseError(res, "invalid token")
-			if tc.Want == nil {
+			if tc.Status < 300 {
 				if err != nil || body.closed {
 					t.Errorf("Got error %v and closed=%v, want nil and an open body", err, body.closed)
 				}
 				return
 			}
 
-			if !errors.Is(err, tc.Want) {
-				t.Errorf("Got error %v, want %v", err, tc.Want)
+			if err == nil || errors.Is(err, autoscan.ErrTargetUnavailable) != tc.Unavailable {
+				t.Errorf("Got error %v, want an error with unavailable=%v", err, tc.Unavailable)
 			}
 			if !body.closed {
 				t.Error("Body is open, want it closed")

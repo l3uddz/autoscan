@@ -46,7 +46,7 @@ func New(c Config) (autoscan.Target, error) {
 
 	l.Debug().Msgf("Plex version: %s", version)
 	if !isSupportedVersion(version) {
-		return nil, fmt.Errorf("plex running unsupported version %s: %w", version, autoscan.ErrFatal)
+		return nil, fmt.Errorf("plex running unsupported version %s", version)
 	}
 
 	libraries, err := api.Libraries()
