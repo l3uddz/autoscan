@@ -10,13 +10,39 @@ on:
     branches:
       - master
 
+# Only the release job writes repository contents. Every other job reads.
+permissions:
+  contents: read
+
 jobs:
+  # govulncheck is separate from the required build job, so that a new
+  # advisory does not block unrelated pull requests.
+  govulncheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: checkout
+        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
+
+      - name: go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: stable
+          check-latest: true
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
+  # build checks and packages branches and pull requests. It is the required
+  # check. The release job handles v* tags.
   build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       # dependencies
       - name: goreleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@b508e2e3ef3b19d4e4146d4f8fb3ba9db644a757 # v3.2.0
         with:
           install-only: true
           version: 1.7.0
@@ -25,28 +51,32 @@ jobs:
         run: goreleaser -v
 
       - name: task
-        uses: arduino/setup-task@v1
+        uses: arduino/setup-task@e26d8975574116b0097a1161e0fe16ba75d84c1c # v1.0.3
+        with:
+          # Without a token, the release lookup uses the shared runner IP
+          # address and can hit the GitHub API rate limit.
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task info
         run: task --version
 
       - name: qemu
         if: github.event.pull_request.head.repo.fork == false
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
 
       - name: buildx
         if: github.event.pull_request.head.repo.fork == false
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
 
       # checkout
       - name: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
         with:
           fetch-depth: 0
 
       # setup go
       - name: go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: stable
           check-latest: true
@@ -59,7 +89,7 @@ jobs:
 
       # cache
       - name: cache-go
-        uses: actions/cache@v3
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3.5.0
         with:
           path: |
             ~/.cache/go-build
@@ -69,7 +99,7 @@ jobs:
             ${{ runner.os }}-go-cache-mod
 
       - name: cache-task
-        uses: actions/cache@v3
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3.5.0
         with:
           path: .task/**/*
           key: ${{ runner.os }}-go-task
@@ -91,38 +121,27 @@ jobs:
       - name: git status
         run: git status
 
-      # build/release reqs
+      # build reqs
       - name: branch name
         id: branch-names
-        uses: tj-actions/branch-names@v9
+        uses: tj-actions/branch-names@5250492686b253f06fa55861556d1027b067aeb5 # v9.0.2
         with:
           replace_slashes_with_hyphens: "true"
-          strip_tag_prefix: "v"
 
       # build
       - name: build
-        if: steps.branch-names.outputs.is_tag == 'false'
         run: |
           task snapshot
 
-      # publish
-      - name: publish
-        if: steps.branch-names.outputs.is_tag == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REF: ${{ github.ref }}
-        run: |
-          task publish
-
       # artifacts
       - name: artifact_linux
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: build_linux
           path: dist/*linux*
 
       - name: artifact_darwin
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: build_darwin
           path: dist/*darwin*
@@ -136,26 +155,10 @@ jobs:
         run: |
           echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
 
-      # docker build (latest & tag)
-      - name: docker - build release
-        if: steps.branch-names.outputs.is_tag == 'true' && github.event.pull_request.head.repo.fork == false
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          pull: true
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            l3uddz/autoscan:${{ steps.branch-names.outputs.tag }}
-            l3uddz/autoscan:latest
-
       # docker build (branch)
       - name: docker - build branch
-        if: steps.branch-names.outputs.is_tag == 'false' && github.event.pull_request.head.repo.fork == false
-        uses: docker/build-push-action@v3
+        if: github.event.pull_request.head.repo.fork == false
+        uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
         with:
           context: .
           file: ./docker/Dockerfile
@@ -170,5 +173,111 @@ jobs:
       # cleanup
       - name: cleanup
         if: github.event.pull_request.head.repo.fork == false
+        run: |
+          rm -f ${HOME}/.docker/config.json
+
+  # release publishes the GitHub release and the release Docker tags for a v*
+  # tag. It is the only job that writes repository contents.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # dependencies
+      - name: goreleaser
+        uses: goreleaser/goreleaser-action@b508e2e3ef3b19d4e4146d4f8fb3ba9db644a757 # v3.2.0
+        with:
+          install-only: true
+          version: 1.7.0
+
+      - name: task
+        uses: arduino/setup-task@e26d8975574116b0097a1161e0fe16ba75d84c1c # v1.0.3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: qemu
+        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
+
+      - name: buildx
+        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
+
+      # checkout
+      - name: checkout
+        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
+        with:
+          fetch-depth: 0
+
+      # setup go
+      - name: go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+
+      # vendor, test, and lint before the release
+      - name: vendor
+        run: task vendor
+
+      - name: tests
+        run: task test
+
+      - name: lint
+        run: task lint
+
+      - name: tag name
+        id: branch-names
+        uses: tj-actions/branch-names@5250492686b253f06fa55861556d1027b067aeb5 # v9.0.2
+        with:
+          strip_tag_prefix: "v"
+
+      # publish
+      - name: publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          task publish
+
+      # artifacts
+      - name: artifact_linux
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build_linux
+          path: dist/*linux*
+
+      - name: artifact_darwin
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build_darwin
+          path: dist/*darwin*
+
+      # docker login
+      - name: docker login
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
+
+      # docker build (latest & tag)
+      - name: docker - build release
+        uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          pull: true
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            l3uddz/autoscan:${{ steps.branch-names.outputs.tag }}
+            l3uddz/autoscan:latest
+
+      # cleanup
+      - name: cleanup
+        if: always()
         run: |
           rm -f ${HOME}/.docker/config.json

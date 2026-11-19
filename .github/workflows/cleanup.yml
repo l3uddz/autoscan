@@ -2,25 +2,50 @@ name: Docker Cleanup
 
 on: delete
 
+# The job uses Docker Hub credentials and needs no GitHub token permission.
+permissions: {}
+
 jobs:
   cleanup_branch:
-    if: startsWith(github.event.ref_type, 'branch') == true
+    if: github.event.ref_type == 'branch'
     runs-on: ubuntu-latest
     steps:
-      - name: docker tag
-        uses: frabert/replace-string-action@v2
-        id: dockertag
-        with:
-          pattern: '[:\.\/]+'
-          string: "${{ github.event.ref }}"
-          replace-with: "-"
-          flags: "g"
-
       - name: remove docker tag
         shell: bash
         env:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          tag: ${{ steps.dockertag.outputs.replaced }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          BRANCH: ${{ github.event.ref }}
         run: |
-          docker run --rm lumir/remove-dockerhub-tag --user "$username" --password "$password" l3uddz/autoscan:$tag
+          set -euo pipefail
+
+          # The build workflow names a branch image tag the same way: it
+          # replaces each slash in the branch name with a hyphen.
+          tag="${BRANCH//\//-}"
+
+          # A branch name can hold characters that a Docker tag cannot, such
+          # as curl URL globs. Such a branch has no image, so delete nothing.
+          if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Branch $BRANCH has no valid Docker tag, nothing to remove"
+            exit 0
+          fi
+
+          token="$(jq -n --arg username "$DOCKER_USERNAME" --arg password "$DOCKER_PASSWORD" \
+              '{username: $username, password: $password}' \
+            | curl -sS --fail-with-body -H 'Content-Type: application/json' --data @- \
+              https://hub.docker.com/v2/users/login/ \
+            | jq -r '.token // empty')"
+          if [ -z "$token" ]; then
+            echo "Docker Hub login returned no token" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+
+          status="$(curl -sS --globoff -o /dev/null -w '%{http_code}' -X DELETE \
+            -H "Authorization: JWT $token" \
+            "https://hub.docker.com/v2/repositories/l3uddz/autoscan/tags/${tag}/")"
+          case "$status" in
+            204) echo "Removed l3uddz/autoscan:${tag}" ;;
+            404) echo "No image tag l3uddz/autoscan:${tag}" ;;
+            *) echo "Removing l3uddz/autoscan:${tag} failed with HTTP $status" >&2; exit 1 ;;
+          esac

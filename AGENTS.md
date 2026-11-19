@@ -84,8 +84,16 @@ task lint
 Do not commit it. If `go mod tidy` changes `go.mod` or `go.sum`, commit
 those changes with the change that caused them.
 
-`task lint` runs `gofmt` on tracked Go files and then `go vet ./...`. If
-`gofmt` lists a file, the task fails. A lint failure fails the `build` job.
+`task lint` runs `gofmt` on tracked Go files, then `go vet ./...`, and then a
+pinned `staticcheck`. If `gofmt` lists a file, the task fails. A lint failure
+fails the `build` job.
+
+A separate `govulncheck` job in the `Build` workflow checks for known
+vulnerabilities. It is not a required check, so a new advisory does not block
+unrelated PRs. Look at its result in each PR.
+
+The workflows pin each action to a commit SHA, with the version in a comment.
+If you update an action, update the SHA and the comment together.
 
 `task build` makes a local binary in `dist/`.
 `task snapshot` needs goreleaser 1.7.0, which CI uses.
