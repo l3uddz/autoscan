@@ -221,6 +221,13 @@ Normal -arr events are much smaller than this limit.
 The Autoscan web server also closes a connection if a client does not send the request headers within 10 seconds.
 It closes an idle keep-alive connection after 2 minutes.
 
+#### Stopping Autoscan
+
+When Autoscan gets SIGINT or SIGTERM after startup, it stops accepting requests and finishes the open requests.
+It also stops scan delivery.
+Autoscan waits up to 8 seconds for open requests and deliveries, and then exits.
+A delivery that does not finish in that time stays queued, and Autoscan sends it after the next start.
+
 ### Configuration
 
 This part of the `config.yml` file shows the possible configuration of the triggers.
