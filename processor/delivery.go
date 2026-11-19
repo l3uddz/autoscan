@@ -11,9 +11,27 @@ import (
 
 const pollInterval = 15 * time.Second
 
+// maxScanAttempts is how many times in a row a target can reject one scan
+// before the worker sets the scan aside.
+const maxScanAttempts = 5
+
 type targetWorker struct {
 	Target
 	client autoscan.Target
+
+	// rejected is the scan revision that the target rejected last, and
+	// rejections counts how many times in a row it rejected it.
+	rejected   scanRevision
+	rejections int
+
+	// setAside reports whether the worker set a scan aside since the last
+	// successful delivery.
+	setAside bool
+}
+
+type scanRevision struct {
+	folder   string
+	revision string
 }
 
 func (p *Processor) runTarget(ctx context.Context, target *targetWorker) {
@@ -80,13 +98,58 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 	}
 	if err := target.client.Scan(scan.Scan); err != nil {
 		target.client = nil
+		if target.rejects(scan, err) {
+			return p.setScanAside(target, scan, err)
+		}
 		return p.retryTarget(target, retryDelay, err)
 	}
-	count, err := p.store.completeDelivery(target.ID, scan)
+	result, err := p.store.completeDelivery(target.ID, scan)
 	if err != nil {
 		return 0, err
 	}
-	p.processed.Add(count)
+	target.rejected, target.rejections, target.setAside = scanRevision{}, 0, false
+	p.processed.Add(result.scans)
+	return p.scanDelay, nil
+}
+
+// rejects counts a failed delivery of scan and reports whether the worker
+// sets the scan aside. An error that means that the target is unavailable
+// does not count. A failed scan resets the client, so each counted failure
+// after the first follows a successful availability check. The worker sets
+// aside at most one scan between two successful deliveries, because a target
+// that rejects every scan is broken and must keep its scans.
+func (target *targetWorker) rejects(scan queuedScan, err error) bool {
+	if errors.Is(err, autoscan.ErrTargetUnavailable) {
+		return false
+	}
+	current := scanRevision{folder: scan.Folder, revision: scan.revision}
+	if target.rejected != current {
+		target.rejected, target.rejections = current, 0
+	}
+	target.rejections++
+	return target.rejections >= maxScanAttempts && !target.setAside
+}
+
+// setScanAside removes the delivery of scan to target without counting it
+// as processed. Delivery continues with the next scan. If a newer event for
+// the folder arrived during the delivery, the delivery stays for the new
+// revision, and the worker can still set aside a scan.
+func (p *Processor) setScanAside(target *targetWorker, scan queuedScan, failure error) (time.Duration, error) {
+	result, err := p.store.completeDelivery(target.ID, scan)
+	if err != nil {
+		return 0, errors.Join(failure, err)
+	}
+	target.rejected, target.rejections = scanRevision{}, 0
+	if !result.removed {
+		return p.scanDelay, nil
+	}
+	target.setAside = true
+	log.Error().
+		Err(failure).
+		Str("target", target.ID).
+		Str("path", scan.Folder).
+		Int("attempts", maxScanAttempts).
+		Msg("Target keeps rejecting scan, scan set aside")
 	return p.scanDelay, nil
 }
 

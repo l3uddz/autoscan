@@ -86,34 +86,49 @@ func (store *datastore) clearIdleRetry(target string) error {
 	return err
 }
 
-func (store *datastore) completeDelivery(target string, scan queuedScan) (int64, error) {
+// deliveryResult reports what completeDelivery removed.
+type deliveryResult struct {
+	// removed reports whether the delivery to the target was removed. A newer
+	// event for the folder keeps the delivery for its new revision.
+	removed bool
+
+	// scans is the number of scans that no target needs any more.
+	scans int64
+}
+
+func (store *datastore) completeDelivery(target string, scan queuedScan) (deliveryResult, error) {
 	tx, err := store.db.Begin()
 	if err != nil {
-		return 0, err
+		return deliveryResult{}, err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
+	delivery, err := tx.Exec(`
 		DELETE FROM scan_delivery WHERE target = ? AND folder = ?
 		AND EXISTS (SELECT 1 FROM scan WHERE folder = scan_delivery.folder AND revision = ?)
-	`, target, scan.Folder, scan.revision); err != nil {
-		return 0, err
+	`, target, scan.Folder, scan.revision)
+	if err != nil {
+		return deliveryResult{}, err
 	}
 	deleted, err := tx.Exec(`
 		DELETE FROM scan WHERE folder = ? AND revision = ?
 		AND NOT EXISTS (SELECT 1 FROM scan_delivery WHERE folder = scan.folder)
 	`, scan.Folder, scan.revision)
 	if err != nil {
-		return 0, err
+		return deliveryResult{}, err
 	}
 	if _, err := tx.Exec(sqlClearRetry, target); err != nil {
-		return 0, err
+		return deliveryResult{}, err
 	}
-	count, err := deleted.RowsAffected()
+	removed, err := delivery.RowsAffected()
 	if err != nil {
-		return 0, err
+		return deliveryResult{}, err
 	}
-	return count, tx.Commit()
+	scans, err := deleted.RowsAffected()
+	if err != nil {
+		return deliveryResult{}, err
+	}
+	return deliveryResult{removed: removed > 0, scans: scans}, tx.Commit()
 }
 
 func targetStatuses(ctx context.Context, tx *sql.Tx) ([]TargetStatus, error) {

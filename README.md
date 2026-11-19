@@ -420,6 +420,13 @@ Autoscan continues to retry every hour until the target recovers.
 Other targets continue at their usual scan rate.
 When a target recovers, Autoscan sends its pending scans at the usual rate.
 A successful scan resets the retry delay.
+
+A target can reject one scan while it accepts others, for example with 400 Bad Request.
+If a target rejects the same scan 5 times in a row and the server stays available, Autoscan sets that scan aside for that target.
+Autoscan logs an error with the folder and continues with the next scan.
+An error that means that the target is unavailable, such as a timeout or 503 Service Unavailable, never sets a scan aside.
+Autoscan sets aside at most one scan between two successful scans.
+If the next scan also fails, Autoscan keeps it and retries the target as usual.
 Each new event for a folder queues a scan for all configured targets.
 
 Plex, Emby, and Jellyfin targets read the library list of the server when they connect.
