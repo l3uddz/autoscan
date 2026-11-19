@@ -2,7 +2,6 @@ package sonarr
 
 import (
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -52,7 +51,7 @@ func parse(r *http.Request) (webhook.Event, error) {
 			return event, webhook.ErrMissingFields
 		}
 
-		event.Folders = []string{path.Dir(path.Join(e.Series.Path, e.File.RelativePath))}
+		event.Folders = []string{webhook.FileFolder(e.Series.Path, e.File.RelativePath)}
 
 	// An entire show has been deleted
 	case strings.EqualFold(e.Type, "SeriesDelete"):
@@ -70,10 +69,10 @@ func parse(r *http.Request) (webhook.Event, error) {
 		}
 
 		for _, renamed := range e.RenamedFiles {
-			event.Folders = append(event.Folders,
-				path.Dir(renamed.PreviousPath),
-				path.Dir(path.Join(e.Series.Path, renamed.RelativePath)),
-			)
+			if folder := webhook.ParentFolder(renamed.PreviousPath); folder != "" {
+				event.Folders = append(event.Folders, folder)
+			}
+			event.Folders = append(event.Folders, webhook.FileFolder(e.Series.Path, renamed.RelativePath))
 		}
 	}
 

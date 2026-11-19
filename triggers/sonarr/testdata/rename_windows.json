@@ -1,0 +1,19 @@
+{
+  "eventType": "Rename",
+  "series": {
+    "path": "C:\\TV\\Westworld"
+  },
+  "renamedEpisodeFiles": [
+    {
+      "previousPath": "C:\\TV\\Westworld\\Season 1\\Westworld.S01E01.mkv",
+      "relativePath": "Season 1\\Westworld - S01E01.mkv"
+    },
+    {
+      "previousPath": "C:\\TV\\Westworld\\Specials\\Westworld.S00E01.mkv",
+      "relativePath": "Season 0\\Westworld - S00E01.mkv"
+    },
+    {
+      "relativePath": "Season 2\\Westworld - S02E01.mkv"
+    }
+  ]
+}

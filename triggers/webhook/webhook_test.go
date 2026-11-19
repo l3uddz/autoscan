@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -267,5 +268,53 @@ func TestFileEvent(t *testing.T) {
 
 	if event, err := FileEvent("Grab", files); err != nil || len(event.Folders) != 0 {
 		t.Errorf("Grab returned %+v, %v, want no folders and no error", event, err)
+	}
+}
+
+func TestParentFolder(t *testing.T) {
+	for file, want := range map[string]string{
+		"/TV/Show/Season 1/episode.mkv":   "/TV/Show/Season 1",
+		`/TV/Show/Season 1/a\b.mkv`:       "/TV/Show/Season 1",
+		"/episode.mkv":                    "/",
+		`C:\TV\Show\Season 1\episode.mkv`: `C:\TV\Show\Season 1`,
+		"C:/TV/Show/episode.mkv":          "C:/TV/Show",
+		`C:\episode.mkv`:                  `C:\`,
+		"C:/episode.mkv":                  "C:/",
+		`\\server\media\Show\episode.mkv`: `\\server\media\Show`,
+		"episode.mkv":                     "",
+		"":                                "",
+	} {
+		if got := ParentFolder(file); got != want {
+			t.Errorf("ParentFolder(%q) = %q, want %q", file, got, want)
+		}
+	}
+}
+
+func TestFileFolder(t *testing.T) {
+	for _, tc := range []struct {
+		base, relative, want string
+	}{
+		{"/TV/Show", "Season 1/episode.mkv", "/TV/Show/Season 1"},
+		{"/TV/Show/", "episode.mkv", "/TV/Show"},
+		{"/TV/Show", `Season 1/a\b.mkv`, "/TV/Show/Season 1"},
+		{`C:\TV\Show`, `Season 1\episode.mkv`, `C:\TV\Show\Season 1`},
+		{`C:\TV\Show\`, "episode.mkv", `C:\TV\Show`},
+		{`C:\`, `Show\episode.mkv`, `C:\Show`},
+		{"C:/TV/Show", "Season 1/episode.mkv", "C:/TV/Show/Season 1"},
+		{`\\server\media\Show`, `Season 1\episode.mkv`, `\\server\media\Show\Season 1`},
+	} {
+		if got := FileFolder(tc.base, tc.relative); got != tc.want {
+			t.Errorf("FileFolder(%q, %q) = %q, want %q", tc.base, tc.relative, got, tc.want)
+		}
+	}
+}
+
+func TestFileEventFindsWindowsFolders(t *testing.T) {
+	event, err := FileEvent("Download", []File{{Path: `C:\Music\Artist\Album\01.flac`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{`C:\Music\Artist\Album`}; !slices.Equal(event.Folders, want) {
+		t.Errorf("Folders = %q, want %q", event.Folders, want)
 	}
 }

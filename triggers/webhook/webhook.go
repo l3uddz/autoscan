@@ -201,8 +201,56 @@ func FileEvent(eventType string, files []File) (Event, error) {
 	}
 
 	for _, f := range files {
-		event.Folders = append(event.Folders, path.Dir(f.Path))
+		event.Folders = append(event.Folders, ParentFolder(f.Path))
 	}
 
 	return event, nil
+}
+
+// The -arrs send the paths of the system that they run on. On Windows, a
+// path has a drive letter or a UNC prefix and can separate its folders with
+// backslashes, which path.Dir and path.Join ignore. The helpers below keep
+// the separators of the input, so that rewrite rules match each folder in
+// the same form as the other paths of the event.
+
+// windowsPath reports whether p is an absolute Windows path, such as
+// C:\TV or \\server\share.
+func windowsPath(p string) bool {
+	hasDrive := len(p) >= 2 && p[1] == ':' &&
+		('a' <= p[0] && p[0] <= 'z' || 'A' <= p[0] && p[0] <= 'Z')
+	return hasDrive || strings.HasPrefix(p, `\\`)
+}
+
+// ParentFolder returns the folder of the file at the absolute path file.
+// A root folder, such as "/" or "C:\", keeps its separator. ParentFolder
+// returns "" for a path without a folder.
+func ParentFolder(file string) string {
+	separators := "/"
+	if windowsPath(file) {
+		separators = `/\`
+	}
+
+	i := strings.LastIndexAny(file, separators)
+	switch {
+	case i < 0:
+		return ""
+	case i == 0, i == 2 && windowsPath(file):
+		return file[:i+1]
+	default:
+		return file[:i]
+	}
+}
+
+// FileFolder returns the folder of the file at relative, a path below the
+// folder base. A Windows base joins relative with its own separator.
+func FileFolder(base string, relative string) string {
+	if !windowsPath(base) {
+		return path.Dir(path.Join(base, relative))
+	}
+
+	separator := "/"
+	if strings.Contains(base, `\`) {
+		separator = `\`
+	}
+	return ParentFolder(strings.TrimRight(base, `/\`) + separator + relative)
 }
