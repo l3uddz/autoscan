@@ -55,6 +55,9 @@ type path struct {
 
 	// watching reports whether the trigger watches the tree at Path.
 	watching atomic.Bool
+
+	// losses counts the removals and renames of the root at Path.
+	losses atomic.Int64
 }
 
 // Status reports how many paths of a trigger it watches.
@@ -127,15 +130,43 @@ func (t *Trigger) Run() {
 
 // watchPath watches the tree at p and tries again until it succeeds.
 func (t *Trigger) watchPath(p *path) {
-	retry(t.log, "Failed watching path", p.Path, func() error {
-		_, err := t.watchTree(p.Path)
-		return err
-	})
+	for {
+		var losses int64
+		retry(t.log, "Failed watching path", p.Path, func() error {
+			losses = p.losses.Load()
+			_, err := t.watchTree(p.Path)
+			return err
+		})
 
-	p.watching.Store(true)
-	t.log.Info().
-		Str("path", p.Path).
-		Msg("Watching path")
+		p.watching.Store(true)
+		watched, again := checkRootLoss(p, losses)
+		if watched {
+			t.log.Info().
+				Str("path", p.Path).
+				Msg("Watching path")
+		}
+		if !again {
+			return
+		}
+
+		t.log.Warn().
+			Str("path", p.Path).
+			Msg("Watched path was removed while autoscan set up its watch, watching it again when it exists")
+	}
+}
+
+// checkRootLoss runs after a walk marks p as watched. The walk started when
+// p had the given number of root losses. checkRootLoss reports whether p is
+// still watched, and whether the walk must run again because the root was
+// lost. rewatchLostRoot ignores a loss while p is not watched, so a loss
+// before the mark is found here. If the loss came after the mark,
+// rewatchLostRoot and checkRootLoss both try to clear the mark, and only
+// the one that clears it starts the next walk.
+func checkRootLoss(p *path, losses int64) (watched bool, again bool) {
+	if p.losses.Load() == losses {
+		return true, false
+	}
+	return false, p.watching.CompareAndSwap(true, false)
 }
 
 // retry calls try until it returns nil. It logs each error with msg and path
@@ -270,7 +301,14 @@ func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
 	}
 
 	for _, p := range t.paths {
-		if filepath.Clean(p.Path) != filepath.Clean(event.Name) || !p.watching.CompareAndSwap(true, false) {
+		if filepath.Clean(p.Path) != filepath.Clean(event.Name) {
+			continue
+		}
+
+		// Count the loss before the mark is cleared, so that a walk that
+		// marks the path at the same time sees it. See checkRootLoss.
+		p.losses.Add(1)
+		if !p.watching.CompareAndSwap(true, false) {
 			continue
 		}
 
