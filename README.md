@@ -210,7 +210,7 @@ Autoscan also supports these events in the latest versions of Radarr and Sonarr:
 If you select a different event in Sonarr, Radarr, Readarr, or Lidarr, for example `On Grab`, Autoscan accepts the webhook and does not start a scan.
 
 We do not know for certain that these three events cover all possible file system changes.
-For now, keep using Bernard or the Inotify trigger to get all scans.
+If you need a scan for every file system change, also use the Inotify trigger.
 
 #### Request limits
 
