@@ -415,6 +415,12 @@ When a target recovers, Autoscan sends its pending scans at the usual rate.
 A successful scan resets the retry delay.
 Each new event for a folder queues a scan for all configured targets.
 
+Plex, Emby, and Jellyfin targets read the library list of the server when they connect.
+If a scan folder is in no library, the target reads the list again, so it finds a library that you added later.
+The target reads the list at most once a minute.
+A folder that is still in no library after a new read does not cause another read for one hour.
+The target then sends no scan for that folder and logs a warning.
+
 Autoscan identifies a target by its type and full configured URL.
 If several entries use the same type and URL, their order distinguishes them.
 If you remove a target, Autoscan removes its pending deliveries.
