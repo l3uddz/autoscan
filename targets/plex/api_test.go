@@ -45,7 +45,10 @@ func TestNewReadsVersionAndLibraries(t *testing.T) {
 		t.Fatalf("New returned %v", err)
 	}
 
-	libs := got.(*target).libraries
+	libs, err := got.(*target).libraries.Matching("/mnt/tv/Show")
+	if err != nil {
+		t.Fatalf("Matching returned %v", err)
+	}
 	if len(libs) != 1 || libs[0].ID != 5 || libs[0].Name != "TV" || libs[0].Path != "/mnt/tv/" {
 		t.Errorf("Libraries = %+v, want one TV library with ID 5 at /mnt/tv/", libs)
 	}

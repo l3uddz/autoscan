@@ -28,8 +28,8 @@ func NewLibrary(id int, name string, path string) Library {
 	return Library{ID: id, Name: name, Path: path}
 }
 
-// Matching returns every library whose path contains folder.
-func Matching(libraries []Library, folder string) []Library {
+// matching returns every library whose path contains folder.
+func matching(libraries []Library, folder string) []Library {
 	matches := make([]Library, 0)
 	for _, lib := range libraries {
 		if strings.HasPrefix(folder, lib.Path) {
@@ -80,12 +80,12 @@ type PathAPI interface {
 type PathTarget struct {
 	log       zerolog.Logger
 	rewrite   autoscan.Rewriter
-	libraries []Library
+	libraries *LibraryList
 	api       PathAPI
 }
 
 // NewPathTarget returns a PathTarget.
-func NewPathTarget(log zerolog.Logger, rewrite autoscan.Rewriter, libraries []Library, api PathAPI) *PathTarget {
+func NewPathTarget(log zerolog.Logger, rewrite autoscan.Rewriter, libraries *LibraryList, api PathAPI) *PathTarget {
 	return &PathTarget{log: log, rewrite: rewrite, libraries: libraries, api: api}
 }
 
@@ -98,7 +98,10 @@ func (t *PathTarget) Available() error {
 func (t *PathTarget) Scan(scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
-	libs := Matching(t.libraries, scanFolder)
+	libs, err := t.libraries.Matching(scanFolder)
+	if err != nil {
+		return err
+	}
 	if len(libs) == 0 {
 		t.log.Warn().
 			Str("path", scanFolder).

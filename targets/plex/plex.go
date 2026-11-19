@@ -20,7 +20,7 @@ type Config struct {
 }
 
 type target struct {
-	libraries []media.Library
+	libraries *media.LibraryList
 
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
@@ -49,14 +49,10 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, fmt.Errorf("plex running unsupported version %s", version)
 	}
 
-	libraries, err := api.Libraries()
+	libraries, err := media.NewLibraryList(l, api.Libraries)
 	if err != nil {
 		return nil, err
 	}
-
-	l.Debug().
-		Interface("libraries", libraries).
-		Msg("Retrieved libraries")
 
 	return &target{
 		libraries: libraries,
@@ -67,16 +63,19 @@ func New(c Config) (autoscan.Target, error) {
 	}, nil
 }
 
-func (t target) Available() error {
+func (t *target) Available() error {
 	_, err := t.api.Version()
 	return err
 }
 
-func (t target) Scan(scan autoscan.Scan) error {
+func (t *target) Scan(scan autoscan.Scan) error {
 	// determine library for this scan
 	scanFolder := t.rewrite(scan.Folder)
 
-	libs := media.Matching(t.libraries, scanFolder)
+	libs, err := t.libraries.Matching(scanFolder)
+	if err != nil {
+		return err
+	}
 	if len(libs) == 0 {
 		t.log.Warn().
 			Str("path", scanFolder).

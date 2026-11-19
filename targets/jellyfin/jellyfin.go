@@ -26,14 +26,10 @@ func New(c Config) (autoscan.Target, error) {
 
 	api := newAPIClient(c.URL, c.Token, l)
 
-	libraries, err := api.Libraries()
+	libraries, err := media.NewLibraryList(l, api.Libraries)
 	if err != nil {
 		return nil, err
 	}
-
-	l.Debug().
-		Interface("libraries", libraries).
-		Msg("Retrieved libraries")
 
 	return media.NewPathTarget(l, rewriter, libraries, api), nil
 }

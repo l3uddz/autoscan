@@ -29,12 +29,12 @@ func TestMatchingReturnsEveryLibrary(t *testing.T) {
 		NewLibrary(3, "TV 2", "/mnt/tv2"),
 	}
 
-	got := Names(Matching(libraries, "/mnt/tv/Show/Season 1"))
+	got := Names(matching(libraries, "/mnt/tv/Show/Season 1"))
 	if want := []string{"TV", "TV 4K"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Matching = %v, want %v", got, want)
 	}
 
-	if got := Matching(libraries, "/mnt/movies/Film"); len(got) != 0 {
+	if got := matching(libraries, "/mnt/movies/Film"); len(got) != 0 {
 		t.Errorf("Matching = %v, want no libraries", got)
 	}
 }
@@ -99,9 +99,13 @@ func TestPathTargetScan(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			api := &fakeAPI{err: tc.APIErr}
-			target := NewPathTarget(zerolog.Nop(), rewrite, libraries, api)
+			list, err := NewLibraryList(zerolog.Nop(), func() ([]Library, error) { return libraries, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := NewPathTarget(zerolog.Nop(), rewrite, list, api)
 
-			err := target.Scan(autoscan.Scan{Folder: tc.Folder})
+			err = target.Scan(autoscan.Scan{Folder: tc.Folder})
 			if !errors.Is(err, tc.APIErr) {
 				t.Errorf("Scan returned %v, want %v", err, tc.APIErr)
 			}
