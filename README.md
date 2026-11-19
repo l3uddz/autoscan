@@ -212,6 +212,10 @@ Autoscan also supports these events in the latest versions of Radarr and Sonarr:
 
 For a `Rename` event, Autoscan also scans the folder that each renamed file was in before the rename.
 
+If Sonarr, Radarr, Readarr, or Lidarr runs on Windows, it sends paths such as `C:\TV\Show`.
+Autoscan finds the folders in these paths and keeps their separators.
+Write the `from` pattern of a rewrite rule for the same path form, for example `'^C:\\TV\\'` for `C:\TV\`.
+
 If you select a different event in Sonarr, Radarr, Readarr, or Lidarr, for example `On Grab`, Autoscan accepts the webhook and does not start a scan.
 
 We do not know for certain that these three events cover all possible file system changes.

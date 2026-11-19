@@ -128,6 +128,55 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Download Event with Windows paths",
+			Given{
+				Config:  Config{Name: "sonarr", Priority: 5},
+				Fixture: "testdata/download_windows.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   `C:\TV\Westworld\Season 1`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+				},
+			},
+		},
+		{
+			"Rename Event with Windows paths",
+			Given{
+				Config:  Config{Name: "sonarr", Priority: 5},
+				Fixture: "testdata/rename_windows.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   `C:\TV\Westworld\Season 1`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   `C:\TV\Westworld\Specials`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   `C:\TV\Westworld\Season 0`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   `C:\TV\Westworld\Season 2`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+				},
+			},
+		},
+		{
 			"Returns bad request on invalid JSON",
 			Given{
 				Config:  standardConfig,

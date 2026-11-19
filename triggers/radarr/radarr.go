@@ -2,7 +2,6 @@ package radarr
 
 import (
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -48,7 +47,7 @@ func parse(r *http.Request) (webhook.Event, error) {
 			return event, webhook.ErrMissingFields
 		}
 
-		event.Folders = []string{path.Dir(path.Join(e.Movie.FolderPath, e.File.RelativePath))}
+		event.Folders = []string{webhook.FileFolder(e.Movie.FolderPath, e.File.RelativePath)}
 
 	case strings.EqualFold(e.Type, "MovieDelete"):
 		if e.Movie.FolderPath == "" {
@@ -67,7 +66,7 @@ func parse(r *http.Request) (webhook.Event, error) {
 
 		event.Folders = []string{e.Movie.FolderPath}
 		for _, renamed := range e.RenamedFiles {
-			if folder := parentFolder(renamed.PreviousPath); folder != "" {
+			if folder := webhook.ParentFolder(renamed.PreviousPath); folder != "" {
 				event.Folders = append(event.Folders, folder)
 			}
 		}
@@ -75,24 +74,6 @@ func parse(r *http.Request) (webhook.Event, error) {
 
 	// Other events, such as Test or Grab, have no folders to scan.
 	return event, nil
-}
-
-// parentFolder returns the folder of a file path that Radarr sends. Radarr
-// on Windows separates folders with backslashes, which path.Dir ignores.
-// The folder keeps the separators of the input, so that rewrite rules match
-// it in the same form as movie.folderPath. A root folder, such as "/" or
-// "C:\", keeps its separator. parentFolder returns "" for a path without a
-// folder.
-func parentFolder(file string) string {
-	i := strings.LastIndexAny(file, `/\`)
-	switch {
-	case i < 0:
-		return ""
-	case i == 0, i == 2 && file[1] == ':':
-		return file[:i+1]
-	default:
-		return file[:i]
-	}
 }
 
 var now = time.Now

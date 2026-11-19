@@ -223,19 +223,3 @@ func TestHandler(t *testing.T) {
 		})
 	}
 }
-
-func TestParentFolder(t *testing.T) {
-	for file, want := range map[string]string{
-		"/Movies/Old/movie.mkv":   "/Movies/Old",
-		`C:\Movies\Old\movie.mkv`: `C:\Movies\Old`,
-		"/movie.mkv":              "/",
-		`C:\movie.mkv`:            `C:\`,
-		"C:/movie.mkv":            "C:/",
-		"movie.mkv":               "",
-		"":                        "",
-	} {
-		if got := parentFolder(file); got != want {
-			t.Errorf("parentFolder(%q) = %q, want %q", file, got, want)
-		}
-	}
-}
