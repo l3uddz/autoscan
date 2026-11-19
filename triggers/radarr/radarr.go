@@ -80,15 +80,16 @@ func parse(r *http.Request) (webhook.Event, error) {
 // parentFolder returns the folder of a file path that Radarr sends. Radarr
 // on Windows separates folders with backslashes, which path.Dir ignores.
 // The folder keeps the separators of the input, so that rewrite rules match
-// it in the same form as movie.folderPath. parentFolder returns "" for a
-// path without a folder.
+// it in the same form as movie.folderPath. A root folder, such as "/" or
+// "C:\", keeps its separator. parentFolder returns "" for a path without a
+// folder.
 func parentFolder(file string) string {
 	i := strings.LastIndexAny(file, `/\`)
 	switch {
 	case i < 0:
 		return ""
-	case i == 0:
-		return file[:1]
+	case i == 0, i == 2 && file[1] == ':':
+		return file[:i+1]
 	default:
 		return file[:i]
 	}
