@@ -50,6 +50,10 @@ jobs:
 
       - name: task
         uses: arduino/setup-task@e26d8975574116b0097a1161e0fe16ba75d84c1c # v1.0.3
+        with:
+          # Without a token, the release lookup uses the shared runner IP
+          # address and can hit the GitHub API rate limit.
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task info
         run: task --version
