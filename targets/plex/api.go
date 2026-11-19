@@ -1,7 +1,6 @@
 package plex
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,90 +8,42 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
 type apiClient struct {
-	client  *http.Client
-	log     zerolog.Logger
-	baseURL string
-	token   string
+	http *httpapi.Client
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) *apiClient {
-	return &apiClient{
-		client:  &http.Client{Timeout: autoscan.TargetTimeout},
-		log:     log,
-		baseURL: baseURL,
-		token:   token,
-	}
-}
-
-func (c apiClient) do(req *http.Request) (*http.Response, error) {
-	req.Header.Set("X-Plex-Token", c.token)
-	req.Header.Set("Accept", "application/json") // Force JSON Response.
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		return nil, autoscan.TargetRequestError(err, autoscan.ErrTargetUnavailable)
-	}
-
-	if err := autoscan.ResponseError(res, "invalid plex token"); err != nil {
-		c.log.Trace().
-			Str("request_url", res.Request.URL.Redacted()).
-			Int("response_status", res.StatusCode).
-			Msg("Request failed")
-
-		return nil, err
-	}
-
-	return res, nil
+func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
+	return apiClient{http: httpapi.New(httpapi.Config{
+		BaseURL: baseURL,
+		Log:     log,
+		Prepare: func(req *http.Request) {
+			req.Header.Set("X-Plex-Token", token)
+			req.Header.Set("Accept", "application/json") // Force JSON Response.
+		},
+		AuthMessage: "invalid plex token",
+	})}
 }
 
 func (c apiClient) Version() (string, error) {
-	reqURL := autoscan.JoinURL(c.baseURL)
-	req, err := http.NewRequest("GET", reqURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed creating version request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
-	}
-
-	res, err := c.do(req)
-	if err != nil {
-		return "", fmt.Errorf("version: %w", err)
-	}
-
-	defer res.Body.Close()
-
-	type Response struct {
+	var resp struct {
 		MediaContainer struct {
 			Version string
 		}
 	}
 
-	resp := new(Response)
-	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
-		return "", autoscan.BodyError("failed decoding version response", err)
+	if err := c.http.GetJSON("", &resp); err != nil {
+		return "", fmt.Errorf("version: %w", err)
 	}
 
 	return resp.MediaContainer.Version, nil
 }
 
 func (c apiClient) Libraries() ([]media.Library, error) {
-	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections")
-	req, err := http.NewRequest("GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed creating libraries request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
-	}
-
-	res, err := c.do(req)
-	if err != nil {
-		return nil, fmt.Errorf("libraries: %w", err)
-	}
-
-	defer res.Body.Close()
-
-	type Response struct {
+	var resp struct {
 		MediaContainer struct {
 			Libraries []struct {
 				ID       int    `json:"key,string"`
@@ -104,12 +55,10 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 		} `json:"MediaContainer"`
 	}
 
-	resp := new(Response)
-	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
-		return nil, autoscan.BodyError("failed decoding libraries response", err)
+	if err := c.http.GetJSON("library/sections", &resp); err != nil {
+		return nil, fmt.Errorf("libraries: %w", err)
 	}
 
-	// process response
 	libraries := make([]media.Library, 0)
 	for _, lib := range resp.MediaContainer.Libraries {
 		for _, folder := range lib.Sections {
@@ -121,21 +70,10 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 }
 
 func (c apiClient) Scan(path string, libraryID int) error {
-	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections", strconv.Itoa(libraryID), "refresh")
-	req, err := http.NewRequest("GET", reqURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed creating scan request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
-	}
-
-	q := url.Values{}
-	q.Add("path", path)
-	req.URL.RawQuery = q.Encode()
-
-	res, err := c.do(req)
-	if err != nil {
+	endpoint := "library/sections/" + strconv.Itoa(libraryID) + "/refresh"
+	if err := c.http.Send(http.MethodGet, endpoint, url.Values{"path": {path}}); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	res.Body.Close()
 	return nil
 }

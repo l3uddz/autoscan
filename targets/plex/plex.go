@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
@@ -23,13 +24,13 @@ type target struct {
 
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
-	api     *apiClient
+	api     apiClient
 }
 
 func New(c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "plex").
-		Str("url", autoscan.RedactURL(c.URL)).Logger()
+		Str("url", httpapi.RedactURL(c.URL)).Logger()
 
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {

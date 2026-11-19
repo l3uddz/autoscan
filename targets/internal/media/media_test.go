@@ -3,12 +3,15 @@ package media
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 )
 
 func TestNewLibraryAddsTrailingSlash(t *testing.T) {
@@ -36,19 +39,24 @@ func TestMatchingReturnsEveryLibrary(t *testing.T) {
 	}
 }
 
-func TestNewUpdatedRequest(t *testing.T) {
-	req, err := NewUpdatedRequest("http://jellyfin:8096/", "/mnt/tv/Show", "Modified")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if req.Method != "POST" || req.URL.String() != "http://jellyfin:8096/Library/Media/Updated" {
-		t.Errorf("Request = %s %s, want POST http://jellyfin:8096/Library/Media/Updated", req.Method, req.URL)
-	}
-
+func TestSendUpdated(t *testing.T) {
+	var method, path, contentType string
 	var body map[string][]map[string]string
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path, contentType = r.Method, r.URL.Path, r.Header.Get("Content-Type")
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("Decoding body: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	c := httpapi.New(httpapi.Config{BaseURL: srv.URL + "/", Log: zerolog.Nop()})
+	if err := SendUpdated(c, "/mnt/tv/Show", "Modified"); err != nil {
 		t.Fatal(err)
+	}
+
+	if method != http.MethodPost || path != "/Library/Media/Updated" || contentType != "application/json" {
+		t.Errorf("Request = %s %s (%s), want POST /Library/Media/Updated (application/json)", method, path, contentType)
 	}
 	want := map[string][]map[string]string{"Updates": {{"path": "/mnt/tv/Show", "updateType": "Modified"}}}
 	if !reflect.DeepEqual(body, want) {
