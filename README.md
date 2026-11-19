@@ -131,6 +131,9 @@ Autoscan supports these triggers:
   If the new directory or one of its subdirectories contains a file, the trigger also scans the new directory. \
   An empty new directory gets no scan. \
   It keeps pending scans in memory until the processor accepts them. \
+  Each watched path starts on its own. If a path is missing or Autoscan cannot watch it, Autoscan logs an error and tries again. The delay starts at 5 seconds and doubles after each failure, up to 5 minutes. The other paths continue. \
+  If Autoscan cannot read or watch a directory below a watched path, it logs a warning and skips that directory. \
+  If a watched path is a mount point, mount it before Autoscan starts. Autoscan cannot see that the mount came up later, because it already watches the empty directory below the mount. \
   The retry delay starts at one second and doubles after each failed retry, up to one minute. \
   Do not use this trigger on top of RClone mounts. \
   _This trigger can still contain bugs._
@@ -390,6 +393,7 @@ If `authentication` sets both a username and a password, use the same Basic auth
 | `blockers` | Reasons that affect all targets. Values include `anchor_unavailable`, `database_unavailable`, and `no_targets`. Autoscan also reports `anchor_unavailable` if the anchor check does not finish within two seconds, for example on a hung network mount. |
 | `oldest_pending_scan_age_seconds` | Age of the oldest queued scan in whole seconds, or `null` if the queue is empty or unavailable. |
 | `targets` | The status of each configured target. This list is empty if the database is unavailable. |
+| `inotify` | For each Inotify trigger, its `id`, the number of configured paths (`paths`), and the number of paths that Autoscan watches (`watching`). This field does not change `can_deliver` or the status code. |
 
 Each target has an `id`, a `pending` scan count, a `last_error`, and a `next_retry` time.
 The `id` uses the target type and its position in that type's configuration list. For example, `plex-1` identifies the first Plex target.

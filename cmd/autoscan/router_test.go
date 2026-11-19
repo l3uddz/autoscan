@@ -15,9 +15,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/migrate"
 	"github.com/l3uddz/autoscan/processor"
+	"github.com/l3uddz/autoscan/triggers/inotify"
 	"github.com/l3uddz/autoscan/triggers/lidarr"
 	"github.com/l3uddz/autoscan/triggers/radarr"
 	"github.com/l3uddz/autoscan/triggers/readarr"
@@ -41,7 +44,7 @@ func newTestRouter(t *testing.T) http.Handler {
 
 func mustRouter(t *testing.T, c config, proc *processor.Processor) http.Handler {
 	t.Helper()
-	router, err := getRouter(c, proc)
+	router, err := getRouter(c, proc, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestRouterReturnsTriggerError(t *testing.T) {
 	var c config
 	c.Triggers.Sonarr = []sonarr.Config{{Name: "sonarr", Rewrite: []autoscan.Rewrite{{From: "("}}}}
 
-	if _, err := getRouter(c, proc); err == nil || !strings.Contains(err.Error(), "trigger sonarr") {
+	if _, err := getRouter(c, proc, nil); err == nil || !strings.Contains(err.Error(), "trigger sonarr") {
 		t.Fatalf("getRouter error = %v, want an error that names the sonarr trigger", err)
 	}
 }
@@ -207,6 +210,28 @@ func TestStatusReportsPendingRetryAndSharedAnchor(t *testing.T) {
 	})
 }
 
+func TestStatusReportsInotifyPathsWithoutNames(t *testing.T) {
+	proc, _ := newRouterTestProcessor(t, processor.Config{})
+	var cfg inotify.Config
+	if err := yaml.Unmarshal([]byte("paths:\n  - path: /private/tv\n  - path: /private/movies\n"), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	watcher, err := inotify.New(cfg, proc.Add)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := getRouter(config{}, proc, []*inotify.Trigger{watcher})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No target means no delivery. An inotify path does not change that.
+	status := requestProcessorStatus(t, router, http.StatusServiceUnavailable)
+	if len(status.Inotify) != 1 || status.Inotify[0].ID != "inotify-1" || status.Inotify[0].Paths != 2 || status.Inotify[0].Watching != 0 {
+		t.Errorf("GET /status inotify = %+v, want inotify-1 with 2 paths and none watched", status.Inotify)
+	}
+}
+
 type statusTestTarget struct{}
 
 func (statusTestTarget) Available() error         { return nil }
@@ -222,6 +247,11 @@ type statusResponse struct {
 		LastError string     `json:"last_error"`
 		NextRetry *time.Time `json:"next_retry"`
 	} `json:"targets"`
+	Inotify []struct {
+		ID       string `json:"id"`
+		Paths    int    `json:"paths"`
+		Watching int    `json:"watching"`
+	} `json:"inotify"`
 }
 
 func requestProcessorStatus(t *testing.T, router http.Handler, wantCode int) statusResponse {

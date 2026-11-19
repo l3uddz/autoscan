@@ -3,6 +3,8 @@
 package inotify
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,9 +17,9 @@ import (
 	"github.com/l3uddz/autoscan"
 )
 
-// newWatchingDaemon returns a daemon that watches root with no rewrite and
+// newWatchingDaemon returns a trigger that watches root with no rewrite and
 // no filter.
-func newWatchingDaemon(t *testing.T, root string) *daemon {
+func newWatchingDaemon(t *testing.T, root string) *Trigger {
 	t.Helper()
 
 	rewriter, err := autoscan.NewRewriter(nil)
@@ -36,8 +38,8 @@ func newWatchingDaemon(t *testing.T, root string) *daemon {
 	}
 	t.Cleanup(func() { _ = watcher.Close() })
 
-	d := &daemon{
-		paths:   []path{{Path: root, Rewriter: rewriter, Allowed: filterer}},
+	d := &Trigger{
+		paths:   []*path{{Path: root, Rewriter: rewriter, Allowed: filterer}},
 		watcher: watcher,
 		log:     zerolog.Nop(),
 	}
@@ -51,7 +53,7 @@ func newWatchingDaemon(t *testing.T, root string) *daemon {
 
 // receiveScans handles the events of d until no event arrives for a short
 // time. It returns the paths that the events would queue.
-func receiveScans(t *testing.T, d *daemon) []string {
+func receiveScans(t *testing.T, d *Trigger) []string {
 	t.Helper()
 
 	var scans []string
@@ -93,7 +95,7 @@ func rename(t *testing.T, from, to string) {
 	}
 }
 
-func assertWatched(t *testing.T, d *daemon, paths ...string) {
+func assertWatched(t *testing.T, d *Trigger, paths ...string) {
 	t.Helper()
 
 	watched := d.watcher.WatchList()
@@ -147,5 +149,67 @@ func TestScanPathEmptyNewDirectory(t *testing.T) {
 	scans := receiveScans(t, d)
 	if want := []string{season}; !slices.Equal(scans, want) {
 		t.Errorf("Got scans %q, want %q", scans, want)
+	}
+}
+
+func newTestTrigger(t *testing.T, roots ...string) *Trigger {
+	t.Helper()
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = watcher.Close() })
+
+	trigger := &Trigger{watcher: watcher, log: zerolog.Nop()}
+	for _, root := range roots {
+		trigger.paths = append(trigger.paths, &path{Path: root})
+	}
+	return trigger
+}
+
+func TestWatchTreeSkipsUnreadableSubdirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a directory without permissions")
+	}
+
+	root := t.TempDir()
+	locked, open := filepath.Join(root, "locked"), filepath.Join(root, "open")
+	mkdirAll(t, filepath.Join(locked, "inner"))
+	mkdirAll(t, open)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	trigger := newTestTrigger(t, root)
+	if _, err := trigger.watchTree(root); err != nil {
+		t.Fatalf("watchTree returned %v, want the unreadable directory skipped", err)
+	}
+
+	watched := trigger.watcher.WatchList()
+	assertWatched(t, trigger, root, open)
+	if slices.Contains(watched, filepath.Join(locked, "inner")) {
+		t.Errorf("Watched a directory below the unreadable directory: %q", watched)
+	}
+}
+
+func TestWatchTreeFailsForMissingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	trigger := newTestTrigger(t, root)
+
+	if _, err := trigger.watchTree(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("watchTree returned %v, want a not-exist error", err)
+	}
+}
+
+func TestStatusCountsWatchedPaths(t *testing.T) {
+	watched := t.TempDir()
+	trigger := newTestTrigger(t, watched, filepath.Join(t.TempDir(), "missing"))
+
+	trigger.watchPath(trigger.paths[0])
+
+	if got, want := trigger.Status(), (Status{Paths: 2, Watching: 1}); got != want {
+		t.Errorf("Status = %+v, want %+v", got, want)
 	}
 }
