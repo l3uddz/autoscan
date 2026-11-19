@@ -23,6 +23,13 @@ jobs:
           # replaces each slash in the branch name with a hyphen.
           tag="${BRANCH//\//-}"
 
+          # A branch name can hold characters that a Docker tag cannot, such
+          # as curl URL globs. Such a branch has no image, so delete nothing.
+          if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Branch $BRANCH has no valid Docker tag, nothing to remove"
+            exit 0
+          fi
+
           token="$(jq -n --arg username "$DOCKER_USERNAME" --arg password "$DOCKER_PASSWORD" \
               '{username: $username, password: $password}' \
             | curl -sS --fail-with-body -H 'Content-Type: application/json' --data @- \
@@ -34,7 +41,7 @@ jobs:
           fi
           echo "::add-mask::$token"
 
-          status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+          status="$(curl -sS --globoff -o /dev/null -w '%{http_code}' -X DELETE \
             -H "Authorization: JWT $token" \
             "https://hub.docker.com/v2/repositories/l3uddz/autoscan/tags/${tag}/")"
           case "$status" in
