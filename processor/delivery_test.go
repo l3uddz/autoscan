@@ -210,8 +210,8 @@ func TestHungAnchorCheckTimesOut(t *testing.T) {
 		if waited := time.Since(start); waited != anchorTimeout {
 			t.Errorf("waitForAnchors waited %v, want %v", waited, anchorTimeout)
 		}
-		if !errors.Is(err, autoscan.ErrAnchorUnavailable) {
-			t.Fatalf("waitForAnchors error = %v, want %v", err, autoscan.ErrAnchorUnavailable)
+		if !errors.Is(err, errAnchorUnavailable) {
+			t.Fatalf("waitForAnchors error = %v, want %v", err, errAnchorUnavailable)
 		}
 	})
 }
@@ -240,7 +240,7 @@ func TestHungAnchorCheckDoesNotBlockShutdown(t *testing.T) {
 
 func TestTargetRetriesStayAtOneHour(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		target := &fakeTarget{err: autoscan.ErrFatal}
+		target := &fakeTarget{err: errors.New("offline")}
 		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("offline", target)}})
 		defer startProcessor(t, proc)()
 
@@ -250,7 +250,7 @@ func TestTargetRetriesStayAtOneHour(t *testing.T) {
 			time.Hour, time.Hour, time.Hour,
 		}
 		for _, delay := range delays {
-			assertTargetStatus(t, proc, "offline", 0, autoscan.ErrFatal.Error(), time.Now().Add(delay))
+			assertTargetStatus(t, proc, "offline", 0, "offline", time.Now().Add(delay))
 			time.Sleep(delay)
 			synctest.Wait()
 		}

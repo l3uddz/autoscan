@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -64,16 +63,12 @@ func (p *Processor) deliveryStatuses(targets []TargetStatus, now time.Time) ([]D
 	}
 	deliveries := make([]DeliveryStatus, 0, len(p.targets))
 	ready := false
-	for i, configured := range p.targets {
+	for _, configured := range p.targets {
 		target, ok := byID[configured.ID]
 		if !ok {
 			continue
 		}
-		label := configured.StatusLabel
-		if label == "" {
-			label = strconv.Itoa(i + 1)
-		}
-		delivery := DeliveryStatus{ID: label, Pending: target.Pending, LastError: publicTargetError(target.LastError)}
+		delivery := DeliveryStatus{ID: configured.StatusLabel, Pending: target.Pending, LastError: publicTargetError(target.LastError)}
 		// The retry record stays until a delivery succeeds, so only a future
 		// retry time means that the worker waits. This matches deliver.
 		if target.NextRetry.After(now) {
