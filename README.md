@@ -207,6 +207,8 @@ Autoscan also supports these events in the latest versions of Radarr and Sonarr:
 - `On Movie Delete` and `On Series Delete`
 - `On Movie File Delete` and `On Episode File Delete`
 
+For a `Rename` event, Autoscan also scans the folder that each renamed file was in before the rename.
+
 If you select a different event in Sonarr, Radarr, Readarr, or Lidarr, for example `On Grab`, Autoscan accepts the webhook and does not start a scan.
 
 We do not know for certain that these three events cover all possible file system changes.

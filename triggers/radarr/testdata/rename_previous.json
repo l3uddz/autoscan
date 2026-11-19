@@ -1,0 +1,16 @@
+{
+  "eventType": "Rename",
+  "movie": {
+    "folderPath": "/Movies/Deadpool (2016)"
+  },
+  "renamedMovieFiles": [
+    {
+      "previousPath": "/Movies/Deadpool/Deadpool.2016.mkv",
+      "relativePath": "Deadpool (2016).mkv"
+    },
+    {
+      "previousPath": "/Movies/Deadpool (2016)/Deadpool.2016.en.srt",
+      "relativePath": "Deadpool (2016).en.srt"
+    }
+  ]
+}

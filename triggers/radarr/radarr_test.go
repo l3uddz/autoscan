@@ -1,7 +1,6 @@
 package radarr
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,6 +112,50 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Rename Event with previous paths",
+			Given{
+				Config:  standardConfig,
+				Fixture: "testdata/rename_previous.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   "/mnt/unionfs/Media/Movies/Deadpool (2016)",
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   "/mnt/unionfs/Media/Movies/Deadpool",
+						Priority: 5,
+						Time:     currentTime,
+					},
+				},
+			},
+		},
+		{
+			"Rename Event with Windows previous paths",
+			Given{
+				Config:  Config{Name: "radarr", Priority: 5},
+				Fixture: "testdata/rename_windows.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   `C:\Movies\Deadpool (2016)`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   `C:\Movies\Deadpool`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+				},
+			},
+		},
+		{
 			"Returns bad request on invalid JSON",
 			Given{
 				Config:  standardConfig,
@@ -146,14 +189,9 @@ func TestHandler(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
+			var got []autoscan.Scan
 			callback := func(scans ...autoscan.Scan) error {
-				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
-					t.Log(scans)
-					t.Log(tc.Expected.Scans)
-					t.Errorf("Scans do not equal")
-					return errors.New("Scans do not equal")
-				}
-
+				got = scans
 				return nil
 			}
 
@@ -179,6 +217,25 @@ func TestHandler(t *testing.T) {
 			if res.StatusCode != tc.Expected.StatusCode {
 				t.Errorf("Status codes do not match: %d vs %d", res.StatusCode, tc.Expected.StatusCode)
 			}
+			if !reflect.DeepEqual(got, tc.Expected.Scans) {
+				t.Errorf("Got scans %v, want %v", got, tc.Expected.Scans)
+			}
 		})
+	}
+}
+
+func TestParentFolder(t *testing.T) {
+	for file, want := range map[string]string{
+		"/Movies/Old/movie.mkv":   "/Movies/Old",
+		`C:\Movies\Old\movie.mkv`: `C:\Movies\Old`,
+		"/movie.mkv":              "/",
+		`C:\movie.mkv`:            `C:\`,
+		"C:/movie.mkv":            "C:/",
+		"movie.mkv":               "",
+		"":                        "",
+	} {
+		if got := parentFolder(file); got != want {
+			t.Errorf("parentFolder(%q) = %q, want %q", file, got, want)
+		}
 	}
 }
