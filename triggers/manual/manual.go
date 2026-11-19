@@ -24,36 +24,30 @@ var (
 	template []byte
 )
 
-// New creates an autoscan-compatible HTTP Trigger for manual webhooks.
-// GET returns the web page and HEAD returns 200. Any other method scans
-// the folders in the dir query parameters.
-func New(c Config) (autoscan.HTTPTrigger, error) {
-	scanTrigger, err := webhook.New(webhook.Config{
+// New returns the HTTP handler for manual webhooks. GET returns the web page
+// and HEAD returns 200. Any other method sends the folders in the dir query
+// parameters to callback.
+func New(c Config, callback autoscan.ProcessorFunc) (http.Handler, error) {
+	scanHandler, err := webhook.New(webhook.Config{
 		Priority:  c.Priority,
 		Rewrite:   c.Rewrite,
 		Verbosity: c.Verbosity,
-	}, parse, now)
+	}, parse, now, callback)
 	if err != nil {
 		return nil, err
 	}
 
-	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
-		scanHandler := scanTrigger(callback)
-
-		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet:
-				rw.Header().Set("Content-Type", "text/html")
-				_, _ = rw.Write(template)
-			case http.MethodHead:
-				rw.WriteHeader(http.StatusOK)
-			default:
-				scanHandler.ServeHTTP(rw, r)
-			}
-		})
-	}
-
-	return trigger, nil
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			rw.Header().Set("Content-Type", "text/html")
+			_, _ = rw.Write(template)
+		case http.MethodHead:
+			rw.WriteHeader(http.StatusOK)
+		default:
+			scanHandler.ServeHTTP(rw, r)
+		}
+	}), nil
 }
 
 var errNoDirectory = errors.New("manual webhook should receive at least one directory")

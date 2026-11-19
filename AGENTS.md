@@ -24,7 +24,7 @@ start a library scan for the folder.
 
 | Path | Content |
 | --- | --- |
-| `autoscan.go` | Core types: `Scan`, `Trigger`, `HTTPTrigger`, `Target`, errors, rewriters, filters |
+| `autoscan.go` | Core types: `Scan`, `ProcessorFunc`, `Target`, `ErrTargetUnavailable`, rewriters, filters |
 | `cmd/autoscan/` | CLI entry point, configuration, HTTP router, trigger and target wiring |
 | `triggers/<name>/` | One package for each trigger (Sonarr, Radarr, Readarr, Lidarr, manual, inotify) |
 | `targets/<name>/` | One package for each target (Plex, Emby, Jellyfin, autoscan) |
@@ -53,11 +53,14 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
 ### Repository conventions
 
 - If you add a trigger, add a package under `triggers/` and add its
-  configuration to `cmd/autoscan/main.go`. Register an `HTTPTrigger` (webhook)
-  in `cmd/autoscan/router.go`. Register a background `Trigger`, such as
-  inotify, in `cmd/autoscan/main.go`.
+  configuration to `cmd/autoscan/main.go`. Its `New` function takes the
+  configuration and an `autoscan.ProcessorFunc`. A webhook trigger returns an
+  `http.Handler`. Use `triggers/webhook` for it, and register it in
+  `cmd/autoscan/router.go`. A background trigger, such as inotify, returns a
+  function that runs in the background. Start it in `cmd/autoscan/main.go`.
 - If you add a target, add a package under `targets/`. Register it in
-  `cmd/autoscan/main.go`.
+  `cmd/autoscan/main.go`. Send its HTTP requests with the client in
+  `targets/internal/httpapi`.
 - Put webhook test payloads in the `testdata/` directory of the trigger package.
 - If you change the datastore schema, add a new numbered file such as
   `2_<name>.sql` to `processor/migrations/`. Do not edit a migration that a

@@ -40,7 +40,9 @@ type path struct {
 	Allowed  autoscan.Filterer
 }
 
-func New(c Config) (autoscan.Trigger, error) {
+// New returns a function that watches the paths of c and sends the scans to
+// callback. The caller runs the function in the background.
+func New(c Config, callback autoscan.ProcessorFunc) (func(), error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("trigger", "inotify").
 		Logger()
@@ -64,7 +66,7 @@ func New(c Config) (autoscan.Trigger, error) {
 		})
 	}
 
-	trigger := func(callback autoscan.ProcessorFunc) {
+	run := func() {
 		d := daemon{
 			log:   l,
 			paths: paths,
@@ -80,7 +82,7 @@ func New(c Config) (autoscan.Trigger, error) {
 		}
 	}
 
-	return trigger, nil
+	return run, nil
 }
 
 func (d *daemon) startMonitoring() error {

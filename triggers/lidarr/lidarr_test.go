@@ -135,12 +135,12 @@ func TestHandler(t *testing.T) {
 				return nil
 			}
 
-			trigger, err := New(tc.Given.Config)
+			handler, err := New(tc.Given.Config, callback)
 			if err != nil {
 				t.Fatalf("Could not create Lidarr Trigger: %v", err)
 			}
 
-			server := httptest.NewServer(trigger(callback))
+			server := httptest.NewServer(handler)
 			defer server.Close()
 
 			request, err := os.Open(tc.Given.Fixture)

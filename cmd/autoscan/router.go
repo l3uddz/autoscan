@@ -53,12 +53,12 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 	protected.Route("/triggers", func(r chi.Router) {
 		// Mixed-style Manual HTTP-trigger
 		r.Route("/manual", func(r chi.Router) {
-			trigger, err := manual.New(c.Triggers.Manual)
+			handler, err := manual.New(c.Triggers.Manual, proc.Add)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", "manual").Msg("Failed initialising trigger")
 			}
 
-			r.HandleFunc("/", trigger(proc.Add).ServeHTTP)
+			r.Handle("/", handler)
 		})
 
 		// OLD-style HTTP-triggers. Can be converted to the /{trigger}/{id} format in a 2.0 release.
@@ -73,14 +73,14 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 
 // addTriggers registers a POST route for each trigger configuration.
 // The route is the trigger name. Autoscan stops if a trigger fails.
-func addTriggers[C any](r chi.Router, proc *processor.Processor, configs []C, name func(C) string, create func(C) (autoscan.HTTPTrigger, error)) {
+func addTriggers[C any](r chi.Router, proc *processor.Processor, configs []C, name func(C) string, create func(C, autoscan.ProcessorFunc) (http.Handler, error)) {
 	for _, c := range configs {
-		trigger, err := create(c)
+		handler, err := create(c, proc.Add)
 		if err != nil {
 			log.Fatal().Err(err).Str("trigger", name(c)).Msg("Failed initialising trigger")
 		}
 
-		r.Post("/"+name(c), trigger(proc.Add).ServeHTTP)
+		r.Post("/"+name(c), handler.ServeHTTP)
 	}
 }
 

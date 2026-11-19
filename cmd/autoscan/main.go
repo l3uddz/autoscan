@@ -46,13 +46,13 @@ type config struct {
 	ScanStats  time.Duration `yaml:"scan-stats"`
 	Anchors    []string      `yaml:"anchors"`
 
-	// Authentication for autoscan.HTTPTrigger
+	// Authentication for the webhook triggers
 	Auth struct {
 		Username string `yaml:"username"`
 		Password string `yaml:"password"`
 	} `yaml:"authentication"`
 
-	// autoscan.HTTPTrigger
+	// Triggers
 	Triggers struct {
 		Manual  manual.Config    `yaml:"manual"`
 		Inotify []inotify.Config `yaml:"inotify"`
@@ -228,7 +228,7 @@ func main() {
 
 	// daemon triggers
 	for _, t := range c.Triggers.Inotify {
-		trigger, err := inotify.New(t)
+		run, err := inotify.New(t, proc.Add)
 		if err != nil {
 			log.Fatal().
 				Err(err).
@@ -236,7 +236,7 @@ func main() {
 				Msg("Failed initialising trigger")
 		}
 
-		go trigger(proc.Add)
+		go run()
 	}
 
 	// http triggers

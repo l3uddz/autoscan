@@ -3,7 +3,6 @@ package autoscan
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"regexp"
 	"time"
 )
@@ -18,15 +17,8 @@ type Scan struct {
 	Time     time.Time
 }
 
+// A ProcessorFunc receives the scans of a trigger.
 type ProcessorFunc func(...Scan) error
-
-type Trigger func(ProcessorFunc)
-
-// A HTTPTrigger is a Trigger which does not run in the background,
-// and instead returns a http.Handler.
-//
-// This http.Handler should be added to the autoscan router in cmd/autoscan.
-type HTTPTrigger func(ProcessorFunc) http.Handler
 
 // A Target receives a Scan from the Processor and translates the Scan
 // into a format understood by the target.
