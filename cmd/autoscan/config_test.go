@@ -4,7 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
@@ -95,6 +98,26 @@ func TestApplyDefaultPathsFillsOnlyEmptyPaths(t *testing.T) {
 	}
 	if want := filepath.Join(dir, "activity.log"); logFile != want {
 		t.Fatalf("expected log path %s, got %s", want, logFile)
+	}
+}
+
+func TestDecodeConfigKeepsDefaultsForUnsetKeys(t *testing.T) {
+	c, err := decodeConfig(strings.NewReader("port: 4040\nscan-delay: 1s\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig returned %v", err)
+	}
+
+	if c.Port != 4040 || c.ScanDelay != time.Second {
+		t.Errorf("port and scan delay = %d, %v, want 4040, 1s", c.Port, c.ScanDelay)
+	}
+	if c.MinimumAge != 10*time.Minute || c.ScanStats != time.Hour || !slices.Equal(c.Host, []string{""}) {
+		t.Errorf("defaults = %v, %v, %q, want 10m, 1h, [\"\"]", c.MinimumAge, c.ScanStats, c.Host)
+	}
+}
+
+func TestDecodeConfigRejectsUnknownKey(t *testing.T) {
+	if _, err := decodeConfig(strings.NewReader("prot: 4040\n")); err == nil {
+		t.Fatal("decodeConfig returned nil error for an unknown key")
 	}
 }
 

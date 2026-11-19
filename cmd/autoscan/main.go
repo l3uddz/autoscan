@@ -17,7 +17,6 @@ import (
 	"github.com/natefinch/lumberjack"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v2"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/migrate"
@@ -123,30 +122,7 @@ func main() {
 	)
 
 	applyDefaultPaths(&cli.Config, &cli.Database, &cli.Log)
-
-	// logger
-	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out:        os.Stderr,
-	}, zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out: &lumberjack.Logger{
-			Filename:   cli.Log,
-			MaxSize:    5,
-			MaxAge:     14,
-			MaxBackups: 5,
-		},
-		NoColor: true,
-	}))
-
-	switch {
-	case cli.Verbosity == 1:
-		log.Logger = logger.Level(zerolog.DebugLevel)
-	case cli.Verbosity > 1:
-		log.Logger = logger.Level(zerolog.TraceLevel)
-	default:
-		log.Logger = logger.Level(zerolog.InfoLevel)
-	}
+	log.Logger = newLogger(cli.Log, cli.Verbosity)
 
 	// datastore
 	db, err := sql.Open("sqlite", cli.Database)
@@ -166,18 +142,7 @@ func main() {
 	}
 	defer file.Close()
 
-	// set default values
-	c := config{
-		MinimumAge: 10 * time.Minute,
-		ScanDelay:  5 * time.Second,
-		ScanStats:  1 * time.Hour,
-		Host:       []string{""},
-		Port:       3030,
-	}
-
-	decoder := yaml.NewDecoder(file)
-	decoder.SetStrict(true)
-	err = decoder.Decode(&c)
+	c, err := decodeConfig(file)
 	if err != nil {
 		log.Fatal().
 			Err(err).
@@ -240,46 +205,15 @@ func main() {
 	}
 
 	// http triggers
-	router := getRouter(c, proc)
-
-	for _, h := range c.Host {
-		go func(host string) {
-			addr := host
-			if !strings.Contains(addr, ":") {
-				addr = fmt.Sprintf("%s:%d", host, c.Port)
-			}
-
-			log.Info().Msgf("Starting server on %s", addr)
-			srv := &http.Server{
-				Addr:              addr,
-				Handler:           router,
-				ReadHeaderTimeout: readHeaderTimeout,
-				IdleTimeout:       idleTimeout,
-			}
-			if err := srv.ListenAndServe(); err != nil {
-				log.Fatal().
-					Str("addr", addr).
-					Err(err).
-					Msg("Failed starting web server")
-			}
-		}(h)
+	router, err := getRouter(c, proc)
+	if err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Failed initialising trigger")
 	}
 
-	log.Info().
-		Int("manual", 1).
-		Int("inotify", len(c.Triggers.Inotify)).
-		Int("lidarr", len(c.Triggers.Lidarr)).
-		Int("radarr", len(c.Triggers.Radarr)).
-		Int("readarr", len(c.Triggers.Readarr)).
-		Int("sonarr", len(c.Triggers.Sonarr)).
-		Msg("Initialised triggers")
-
-	log.Info().
-		Int("autoscan", len(c.Targets.Autoscan)).
-		Int("plex", len(c.Targets.Plex)).
-		Int("emby", len(c.Targets.Emby)).
-		Int("jellyfin", len(c.Targets.Jellyfin)).
-		Msg("Configured targets")
+	startServers(c.Host, c.Port, router)
+	logConfigured(c)
 
 	// scan stats
 	if c.ScanStats > 0 {
@@ -300,6 +234,79 @@ func main() {
 	}
 
 	proc.Run(context.Background())
+}
+
+// newLogger returns a logger that writes to stderr and to the rotated log
+// file at path. verbosity 1 selects debug and more selects trace.
+func newLogger(path string, verbosity int) zerolog.Logger {
+	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
+		TimeFormat: time.Stamp,
+		Out:        os.Stderr,
+	}, zerolog.ConsoleWriter{
+		TimeFormat: time.Stamp,
+		Out: &lumberjack.Logger{
+			Filename:   path,
+			MaxSize:    5,
+			MaxAge:     14,
+			MaxBackups: 5,
+		},
+		NoColor: true,
+	}))
+
+	switch {
+	case verbosity == 1:
+		return logger.Level(zerolog.DebugLevel)
+	case verbosity > 1:
+		return logger.Level(zerolog.TraceLevel)
+	default:
+		return logger.Level(zerolog.InfoLevel)
+	}
+}
+
+// startServers serves handler on each host in the background. A host
+// without a port uses port. Autoscan stops if a server fails.
+func startServers(hosts []string, port int, handler http.Handler) {
+	for _, host := range hosts {
+		addr := host
+		if !strings.Contains(addr, ":") {
+			addr = fmt.Sprintf("%s:%d", host, port)
+		}
+
+		go func() {
+			log.Info().Msgf("Starting server on %s", addr)
+			srv := &http.Server{
+				Addr:              addr,
+				Handler:           handler,
+				ReadHeaderTimeout: readHeaderTimeout,
+				IdleTimeout:       idleTimeout,
+			}
+			if err := srv.ListenAndServe(); err != nil {
+				log.Fatal().
+					Str("addr", addr).
+					Err(err).
+					Msg("Failed starting web server")
+			}
+		}()
+	}
+}
+
+// logConfigured logs how many triggers and targets c configures.
+func logConfigured(c config) {
+	log.Info().
+		Int("manual", 1).
+		Int("inotify", len(c.Triggers.Inotify)).
+		Int("lidarr", len(c.Triggers.Lidarr)).
+		Int("radarr", len(c.Triggers.Radarr)).
+		Int("readarr", len(c.Triggers.Readarr)).
+		Int("sonarr", len(c.Triggers.Sonarr)).
+		Msg("Initialised triggers")
+
+	log.Info().
+		Int("autoscan", len(c.Targets.Autoscan)).
+		Int("plex", len(c.Targets.Plex)).
+		Int("emby", len(c.Targets.Emby)).
+		Int("jellyfin", len(c.Targets.Jellyfin)).
+		Msg("Configured targets")
 }
 
 func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(C) (autoscan.Target, error)) []processor.Target {

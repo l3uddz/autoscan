@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -21,7 +23,14 @@ import (
 	"github.com/l3uddz/autoscan/triggers/sonarr"
 )
 
-func getRouter(c config, proc *processor.Processor) chi.Router {
+// getRouter returns the HTTP routes. It returns an error if a trigger
+// configuration is not valid.
+func getRouter(c config, proc *processor.Processor) (chi.Router, error) {
+	manualTrigger, err := manual.New(c.Triggers.Manual, proc.Add)
+	if err != nil {
+		return nil, fmt.Errorf("trigger manual: %w", err)
+	}
+
 	r := chi.NewRouter()
 
 	// Middleware
@@ -53,35 +62,37 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 	protected.Route("/triggers", func(r chi.Router) {
 		// Mixed-style Manual HTTP-trigger
 		r.Route("/manual", func(r chi.Router) {
-			handler, err := manual.New(c.Triggers.Manual, proc.Add)
-			if err != nil {
-				log.Fatal().Err(err).Str("trigger", "manual").Msg("Failed initialising trigger")
-			}
-
-			r.Handle("/", handler)
+			r.Handle("/", manualTrigger)
 		})
 
 		// OLD-style HTTP-triggers. Can be converted to the /{trigger}/{id} format in a 2.0 release.
-		addTriggers(r, proc, c.Triggers.Lidarr, func(t lidarr.Config) string { return t.Name }, lidarr.New)
-		addTriggers(r, proc, c.Triggers.Radarr, func(t radarr.Config) string { return t.Name }, radarr.New)
-		addTriggers(r, proc, c.Triggers.Readarr, func(t readarr.Config) string { return t.Name }, readarr.New)
-		addTriggers(r, proc, c.Triggers.Sonarr, func(t sonarr.Config) string { return t.Name }, sonarr.New)
+		err = errors.Join(
+			addTriggers(r, proc.Add, c.Triggers.Lidarr, func(t lidarr.Config) string { return t.Name }, lidarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Radarr, func(t radarr.Config) string { return t.Name }, radarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Readarr, func(t readarr.Config) string { return t.Name }, readarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Sonarr, func(t sonarr.Config) string { return t.Name }, sonarr.New),
+		)
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return r
+	return r, nil
 }
 
 // addTriggers registers a POST route for each trigger configuration.
-// The route is the trigger name. Autoscan stops if a trigger fails.
-func addTriggers[C any](r chi.Router, proc *processor.Processor, configs []C, name func(C) string, create func(C, autoscan.ProcessorFunc) (http.Handler, error)) {
+// The route is the trigger name. It stops at the first trigger that fails.
+func addTriggers[C any](r chi.Router, callback autoscan.ProcessorFunc, configs []C, name func(C) string, create func(C, autoscan.ProcessorFunc) (http.Handler, error)) error {
 	for _, c := range configs {
-		handler, err := create(c, proc.Add)
+		handler, err := create(c, callback)
 		if err != nil {
-			log.Fatal().Err(err).Str("trigger", name(c)).Msg("Failed initialising trigger")
+			return fmt.Errorf("trigger %s: %w", name(c), err)
 		}
 
 		r.Post("/"+name(c), handler.ServeHTTP)
 	}
+
+	return nil
 }
 
 // Other Handlers

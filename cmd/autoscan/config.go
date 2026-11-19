@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v2"
 )
 
 var userConfigDirFunc = os.UserConfigDir
@@ -99,4 +101,24 @@ func waitForConfig(path string, interval time.Duration) (*os.File, error) {
 		}
 		time.Sleep(interval)
 	}
+}
+
+// decodeConfig decodes the YAML configuration in r over the default values.
+// It returns an error for a key that config does not define.
+func decodeConfig(r io.Reader) (config, error) {
+	c := config{
+		MinimumAge: 10 * time.Minute,
+		ScanDelay:  5 * time.Second,
+		ScanStats:  1 * time.Hour,
+		Host:       []string{""},
+		Port:       3030,
+	}
+
+	decoder := yaml.NewDecoder(r)
+	decoder.SetStrict(true)
+	if err := decoder.Decode(&c); err != nil {
+		return config{}, err
+	}
+
+	return c, nil
 }
