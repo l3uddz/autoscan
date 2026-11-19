@@ -103,12 +103,12 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 		}
 		return p.retryTarget(target, retryDelay, err)
 	}
-	count, err := p.store.completeDelivery(target.ID, scan)
+	result, err := p.store.completeDelivery(target.ID, scan)
 	if err != nil {
 		return 0, err
 	}
 	target.rejected, target.rejections, target.setAside = scanRevision{}, 0, false
-	p.processed.Add(count)
+	p.processed.Add(result.scans)
 	return p.scanDelay, nil
 }
 
@@ -131,12 +131,19 @@ func (target *targetWorker) rejects(scan queuedScan, err error) bool {
 }
 
 // setScanAside removes the delivery of scan to target without counting it
-// as processed. Delivery continues with the next scan.
+// as processed. Delivery continues with the next scan. If a newer event for
+// the folder arrived during the delivery, the delivery stays for the new
+// revision, and the worker can still set aside a scan.
 func (p *Processor) setScanAside(target *targetWorker, scan queuedScan, failure error) (time.Duration, error) {
-	if _, err := p.store.completeDelivery(target.ID, scan); err != nil {
+	result, err := p.store.completeDelivery(target.ID, scan)
+	if err != nil {
 		return 0, errors.Join(failure, err)
 	}
-	target.rejected, target.rejections, target.setAside = scanRevision{}, 0, true
+	target.rejected, target.rejections = scanRevision{}, 0
+	if !result.removed {
+		return p.scanDelay, nil
+	}
+	target.setAside = true
 	log.Error().
 		Err(failure).
 		Str("target", target.ID).

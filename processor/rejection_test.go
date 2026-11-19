@@ -3,6 +3,8 @@ package processor
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -75,23 +77,76 @@ func TestTargetThatRejectsEveryScanSetsAsideOnlyOne(t *testing.T) {
 	})
 }
 
-func TestUnavailableTargetNeverSetsScanAside(t *testing.T) {
+func TestUnavailableErrorsDoNotCountAsRejections(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		failure := fmt.Errorf("503 Service Unavailable: %w", autoscan.ErrTargetUnavailable)
-		target := &fakeTarget{onScan: func(autoscan.Scan) error { return failure }}
+		unavailable := fmt.Errorf("503 Service Unavailable: %w", autoscan.ErrTargetUnavailable)
+		var rejecting atomic.Bool
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			switch {
+			case scan.Folder != "folder":
+				return nil
+			case rejecting.Load():
+				return errors.New("400 Bad Request")
+			default:
+				return unavailable
+			}
+		}}
 		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "folder", "next")
+		defer startProcessor(t, proc)()
+
+		// Seven unavailable attempts, at 0s, 15s, 45s, 105s, 225s, 465s,
+		// and 945s, keep the scan.
+		time.Sleep(945 * time.Second)
+		synctest.Wait()
+		assertAttempts(t, target, 7)
+		assertTargetStatus(t, proc, "server", 2, unavailable.Error(), time.Now().Add(16*time.Minute))
+
+		// Five rejections in a row then set it aside. The unavailable attempts
+		// did not count toward them.
+		rejecting.Store(true)
+		time.Sleep(16*time.Minute + 32*time.Minute + 3*time.Hour)
+		synctest.Wait()
+		assertDelivered(t, target, slices.Concat(slices.Repeat([]string{"folder"}, 12), []string{"next"})...)
+		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
+		}
+	})
+}
+
+func TestNewerEventKeepsSetAsideAllowance(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var proc *Processor
+		var attempts atomic.Int32
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			// A new event for the folder arrives during the fifth attempt.
+			if attempts.Add(1) == maxScanAttempts {
+				if err := proc.Add(autoscan.Scan{Folder: scan.Folder, Time: time.Now().Add(-time.Minute)}); err != nil {
+					t.Error(err)
+				}
+			}
+			return errors.New("400 Bad Request")
+		}}
+		proc = testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
 		addScans(t, proc, "folder")
 		defer startProcessor(t, proc)()
 
-		// Wait past seven attempts.
-		time.Sleep(retriesUntilSetAside + 240*time.Second + 480*time.Second)
+		// The fifth attempt keeps the new revision. Five attempts of the new
+		// revision then set it aside, because no scan was set aside before.
+		time.Sleep(2 * retriesUntilSetAside)
 		synctest.Wait()
-		target.mu.Lock()
-		attempts := len(target.scans)
-		target.mu.Unlock()
-		if attempts != 7 {
-			t.Fatalf("Delivery attempts = %d, want 7", attempts)
+		assertAttempts(t, target, 2*maxScanAttempts)
+		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
 		}
-		assertTargetStatus(t, proc, "server", 1, failure.Error(), time.Now().Add(16*time.Minute))
 	})
+}
+
+func assertAttempts(t *testing.T, target *fakeTarget, want int) {
+	t.Helper()
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if len(target.scans) != want {
+		t.Fatalf("Delivery attempts = %d, want %d", len(target.scans), want)
+	}
 }
