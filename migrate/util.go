@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -61,28 +60,12 @@ func (m *Migrator) versions(component string) (map[int]bool, error) {
 	return versions, nil
 }
 
-func (m *Migrator) exec(component string, migration *migration) (err error) {
-	// begin tx
+func (m *Migrator) exec(component string, migration *migration) error {
 	tx, err := m.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-
-	// commit - rollback
-	defer func(tx *sql.Tx) {
-		// roll back
-		if err != nil {
-			if errRb := tx.Rollback(); errRb != nil {
-				err = fmt.Errorf("rollback: %v: %w", errRb, err)
-			}
-			return
-		}
-
-		// commit
-		if errCm := tx.Commit(); errCm != nil {
-			err = fmt.Errorf("commit: %w", errCm)
-		}
-	}(tx)
+	defer tx.Rollback()
 
 	// exec migration
 	if _, err := tx.Exec(migration.Schema); err != nil {
@@ -92,6 +75,10 @@ func (m *Migrator) exec(component string, migration *migration) (err error) {
 	// insert migration version
 	if _, err := tx.Exec(sqlInsertVersion, component, migration.Version); err != nil {
 		return fmt.Errorf("schema_migration: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 
 	return nil

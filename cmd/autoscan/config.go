@@ -3,19 +3,17 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v2"
 )
 
-var (
-	userConfigDirFunc = os.UserConfigDir
-	warnConfigDirOnce sync.Once
-)
+var userConfigDirFunc = os.UserConfigDir
 
 // applyDefaultPaths sets each empty path to a file in the default config
 // directory. It resolves that directory only if a path is empty, because
@@ -56,13 +54,9 @@ func defaultConfigDirectory(app string, filename string) string {
 			return acd
 		}
 
-		warnConfigDirOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "autoscan: failed ensuring config directory %s: %v\n", acd, mkErr)
-		})
+		fmt.Fprintf(os.Stderr, "autoscan: failed ensuring config directory %s: %v\n", acd, mkErr)
 	} else if err != nil {
-		warnConfigDirOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "autoscan: unable to determine user config directory: %v\n", err)
-		})
+		fmt.Fprintf(os.Stderr, "autoscan: unable to determine user config directory: %v\n", err)
 	}
 
 	return bcd
@@ -107,4 +101,24 @@ func waitForConfig(path string, interval time.Duration) (*os.File, error) {
 		}
 		time.Sleep(interval)
 	}
+}
+
+// decodeConfig decodes the YAML configuration in r over the default values.
+// It returns an error for a key that config does not define.
+func decodeConfig(r io.Reader) (config, error) {
+	c := config{
+		MinimumAge: 10 * time.Minute,
+		ScanDelay:  5 * time.Second,
+		ScanStats:  1 * time.Hour,
+		Host:       []string{""},
+		Port:       3030,
+	}
+
+	decoder := yaml.NewDecoder(r)
+	decoder.SetStrict(true)
+	if err := decoder.Decode(&c); err != nil {
+		return config{}, err
+	}
+
+	return c, nil
 }

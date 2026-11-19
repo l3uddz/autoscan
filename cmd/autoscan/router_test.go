@@ -36,7 +36,27 @@ func newTestRouter(t *testing.T) http.Handler {
 	c.Triggers.Readarr = []readarr.Config{{Name: "readarr"}}
 	c.Triggers.Sonarr = []sonarr.Config{{Name: "sonarr"}}
 
-	return getRouter(c, proc)
+	return mustRouter(t, c, proc)
+}
+
+func mustRouter(t *testing.T, c config, proc *processor.Processor) http.Handler {
+	t.Helper()
+	router, err := getRouter(c, proc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return router
+}
+
+func TestRouterReturnsTriggerError(t *testing.T) {
+	proc, _ := newRouterTestProcessor(t, processor.Config{})
+
+	var c config
+	c.Triggers.Sonarr = []sonarr.Config{{Name: "sonarr", Rewrite: []autoscan.Rewrite{{From: "("}}}}
+
+	if _, err := getRouter(c, proc); err == nil || !strings.Contains(err.Error(), "trigger sonarr") {
+		t.Fatalf("getRouter error = %v, want an error that names the sonarr trigger", err)
+	}
 }
 
 func newRouterTestProcessor(t *testing.T, cfg processor.Config) (*processor.Processor, *sql.DB) {
@@ -108,7 +128,7 @@ func TestRouter(t *testing.T) {
 
 func TestStatusReportsDatabaseFailureWhileHealthResponds(t *testing.T) {
 	proc, db := newRouterTestProcessor(t, processor.Config{})
-	router := getRouter(config{}, proc)
+	router := mustRouter(t, config{}, proc)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +173,7 @@ func TestStatusReportsPendingRetryAndSharedAnchor(t *testing.T) {
 		defer stop()
 		go proc.Run(ctx)
 		synctest.Wait()
-		router := getRouter(config{}, proc)
+		router := mustRouter(t, config{}, proc)
 
 		status := requestProcessorStatus(t, router, http.StatusOK)
 		if !status.CanDeliver || len(status.Blockers) != 0 || status.OldestAge == nil || *status.OldestAge != 60 {

@@ -1,0 +1,231 @@
+// Package httpapi holds the HTTP client that the targets share.
+// The client marks the errors that mean that a target is unavailable with
+// autoscan.ErrTargetUnavailable, and it keeps credentials out of errors and
+// logs.
+package httpapi
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/l3uddz/autoscan"
+)
+
+// timeout limits each HTTP request that a target sends.
+// When a request times out, the target is unavailable, and the processor
+// retries later. The scan stays in the datastore until then.
+const timeout = 30 * time.Second
+
+// Config describes how a Client talks to one media server.
+type Config struct {
+	// BaseURL is the server URL from the target configuration.
+	BaseURL string
+
+	// Log receives a trace line for each failed request.
+	Log zerolog.Logger
+
+	// Prepare adds the headers or query parameters that the server needs,
+	// such as the token, to each request.
+	Prepare func(*http.Request)
+
+	// AuthMessage describes a 401 response.
+	AuthMessage string
+
+	// SecretParams are the query parameters that carry tokens.
+	// The client removes them from logged URLs.
+	SecretParams []string
+}
+
+// A Client sends requests to one media server.
+type Client struct {
+	client *http.Client
+	config Config
+}
+
+// New returns a Client for c.
+func New(c Config) *Client {
+	return &Client{
+		client: &http.Client{Timeout: timeout},
+		config: c,
+	}
+}
+
+// Send sends a request without a body and closes the response body.
+// endpoint is relative to the base URL. If query is not nil, it replaces
+// the query of the request URL.
+func (c *Client) Send(method string, endpoint string, query url.Values) error {
+	req, err := c.newRequest(method, endpoint, query, nil)
+	if err != nil {
+		return err
+	}
+
+	res, err := c.do(req)
+	if err != nil {
+		return err
+	}
+
+	// The server accepted the request, so a failed close does not fail it.
+	res.Body.Close()
+	return nil
+}
+
+// PostJSON sends v as the JSON body of a POST request and closes the
+// response body.
+func (c *Client) PostJSON(endpoint string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("encoding request body: %w", err)
+	}
+
+	req, err := c.newRequest(http.MethodPost, endpoint, nil, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := c.do(req)
+	if err != nil {
+		return err
+	}
+
+	res.Body.Close()
+	return nil
+}
+
+// GetJSON sends a GET request and decodes the JSON response body into v.
+func (c *Client) GetJSON(endpoint string, v any) error {
+	req, err := c.newRequest(http.MethodGet, endpoint, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	res, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if err := json.NewDecoder(res.Body).Decode(v); err != nil {
+		return bodyError("decoding response", err)
+	}
+
+	return nil
+}
+
+// newRequest returns a request for endpoint, which is relative to the base
+// URL. If query is not nil, it replaces the query of the request URL.
+func (c *Client) newRequest(method string, endpoint string, query url.Values, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, joinURL(c.config.BaseURL, endpoint), body)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
+	}
+
+	if query != nil {
+		req.URL.RawQuery = query.Encode()
+	}
+
+	return req, nil
+}
+
+// do prepares and sends req, and returns the response for a 2xx status.
+// The caller closes the response body.
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.config.Prepare != nil {
+		c.config.Prepare(req)
+	}
+
+	res, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", withoutURL(err), autoscan.ErrTargetUnavailable)
+	}
+
+	if err := responseError(res, c.config.AuthMessage); err != nil {
+		c.config.Log.Trace().
+			Str("request_url", RedactURL(res.Request.URL.String(), c.config.SecretParams...)).
+			Int("response_status", res.StatusCode).
+			Msg("Request failed")
+
+		return nil, err
+	}
+
+	return res, nil
+}
+
+// withoutURL returns the cause of a *url.Error. The error then omits the
+// request URL, which can contain credentials.
+func withoutURL(err error) error {
+	var urlErr *url.Error
+	for errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	return err
+}
+
+// RedactURL returns raw for a log line. It replaces the user password with
+// "xxxxx" and removes the secretParams query parameters, which carry tokens.
+// If raw is not a valid URL, RedactURL returns "invalid url".
+func RedactURL(raw string, secretParams ...string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid url"
+	}
+
+	if len(secretParams) > 0 {
+		q := u.Query()
+		for _, p := range secretParams {
+			q.Del(p)
+		}
+		u.RawQuery = q.Encode()
+	}
+
+	return u.Redacted()
+}
+
+// bodyError wraps an error from reading or decoding a response body.
+// A timeout means that the target is unavailable.
+func bodyError(msg string, err error) error {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("%s: %w: %w", msg, err, autoscan.ErrTargetUnavailable)
+	}
+
+	return fmt.Errorf("%s: %w", msg, err)
+}
+
+// responseError returns nil for a 2xx response. For any other status, it
+// closes the response body and returns an error. authMessage describes a 401
+// status. 404 and 5xx gateway errors mean that the target is unavailable.
+func responseError(res *http.Response, authMessage string) error {
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		return nil
+	}
+
+	res.Body.Close()
+
+	switch res.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("%s: %s", authMessage, res.Status)
+	case http.StatusNotFound, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
+	default:
+		return errors.New(res.Status)
+	}
+}
+
+func joinURL(base string, endpoint string) string {
+	// credits: https://stackoverflow.com/a/57220413
+	p := path.Join(endpoint)
+	return fmt.Sprintf("%s/%s", strings.TrimRight(base, "/"), strings.TrimLeft(p, "/"))
+}

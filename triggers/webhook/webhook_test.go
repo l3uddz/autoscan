@@ -72,11 +72,6 @@ func TestHandler(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			parse := func(*http.Request) (Event, error) { return tc.Event, tc.ParseErr }
-			trigger, err := New(Config{Priority: 3, Rewrite: rewrites}, parse, now)
-			if err != nil {
-				t.Fatal(err)
-			}
-
 			var got []string
 			callback := func(scans ...autoscan.Scan) error {
 				for _, scan := range scans {
@@ -88,8 +83,13 @@ func TestHandler(t *testing.T) {
 				return tc.CallbackErr
 			}
 
+			handler, err := New(Config{Priority: 3, Rewrite: rewrites}, parse, now, callback)
+			if err != nil {
+				t.Fatal(err)
+			}
+
 			rec := httptest.NewRecorder()
-			trigger(callback).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 
 			if rec.Code != tc.WantStatus {
 				t.Errorf("Status = %d, want %d", rec.Code, tc.WantStatus)
@@ -140,7 +140,7 @@ func TestHandlerVerbosity(t *testing.T) {
 				return Event{Type: "Test"}, nil
 			}
 
-			trigger, err := New(Config{Verbosity: tc.Verbosity}, parse, time.Now)
+			handler, err := New(Config{Verbosity: tc.Verbosity}, parse, time.Now, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +151,7 @@ func TestHandlerVerbosity(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/", nil)
 			r = r.WithContext(requestLog.WithContext(r.Context()))
 
-			trigger(nil).ServeHTTP(httptest.NewRecorder(), r)
+			handler.ServeHTTP(httptest.NewRecorder(), r)
 
 			for _, msg := range tc.WantLogs {
 				if !strings.Contains(logs.String(), msg) {
@@ -231,19 +231,19 @@ func TestHandlerRejectsOversizedBody(t *testing.T) {
 		var v string
 		return Event{Type: "Download", Folders: []string{"/data/tv"}}, DecodeJSON(r, &v)
 	}
-	trigger, err := New(Config{}, parse, time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	callback := func(...autoscan.Scan) error {
 		t.Error("Handler sent scans to the processor for an oversized body")
 		return nil
 	}
 
+	handler, err := New(Config{}, parse, time.Now, callback)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	body := strings.NewReader(jsonString(maxBodyBytes + 1))
 	rec := httptest.NewRecorder()
-	trigger(callback).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", body))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", body))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("Status = %d, want %d", rec.Code, http.StatusBadRequest)

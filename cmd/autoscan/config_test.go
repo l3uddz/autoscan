@@ -4,13 +4,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
 	binDir := setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	configRoot := filepath.Join(t.TempDir(), "user-config")
 	stubUserConfigDir(t, func() (string, error) {
@@ -34,7 +35,6 @@ func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
 
 func TestDefaultConfigDirectoryFallsBackWhenUserConfigDirUnavailable(t *testing.T) {
 	expected := setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	stubUserConfigDir(t, func() (string, error) {
 		return "", errors.New("missing home")
@@ -48,7 +48,6 @@ func TestDefaultConfigDirectoryFallsBackWhenUserConfigDirUnavailable(t *testing.
 
 func TestDefaultConfigDirectoryFallsBackWhenConfigDirCannotBeCreated(t *testing.T) {
 	expected := setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	tempFile := filepath.Join(t.TempDir(), "config-root")
 	if err := os.WriteFile(tempFile, []byte("x"), 0o644); err != nil {
@@ -81,7 +80,6 @@ func TestApplyDefaultPathsSkipsConfigDirWhenAllPathsSet(t *testing.T) {
 
 func TestApplyDefaultPathsFillsOnlyEmptyPaths(t *testing.T) {
 	setBinaryPath(t)
-	warnConfigDirOnce = sync.Once{}
 
 	configRoot := filepath.Join(t.TempDir(), "user-config")
 	stubUserConfigDir(t, func() (string, error) {
@@ -100,6 +98,26 @@ func TestApplyDefaultPathsFillsOnlyEmptyPaths(t *testing.T) {
 	}
 	if want := filepath.Join(dir, "activity.log"); logFile != want {
 		t.Fatalf("expected log path %s, got %s", want, logFile)
+	}
+}
+
+func TestDecodeConfigKeepsDefaultsForUnsetKeys(t *testing.T) {
+	c, err := decodeConfig(strings.NewReader("port: 4040\nscan-delay: 1s\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig returned %v", err)
+	}
+
+	if c.Port != 4040 || c.ScanDelay != time.Second {
+		t.Errorf("port and scan delay = %d, %v, want 4040, 1s", c.Port, c.ScanDelay)
+	}
+	if c.MinimumAge != 10*time.Minute || c.ScanStats != time.Hour || !slices.Equal(c.Host, []string{""}) {
+		t.Errorf("defaults = %v, %v, %q, want 10m, 1h, [\"\"]", c.MinimumAge, c.ScanStats, c.Host)
+	}
+}
+
+func TestDecodeConfigRejectsUnknownKey(t *testing.T) {
+	if _, err := decodeConfig(strings.NewReader("prot: 4040\n")); err == nil {
+		t.Fatal("decodeConfig returned nil error for an unknown key")
 	}
 }
 

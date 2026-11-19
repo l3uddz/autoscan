@@ -2,6 +2,7 @@ package emby
 
 import (
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
@@ -15,7 +16,7 @@ type Config struct {
 func New(c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "emby").
-		Str("url", autoscan.RedactURL(c.URL)).
+		Str("url", httpapi.RedactURL(c.URL)).
 		Logger()
 
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)

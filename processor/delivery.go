@@ -66,7 +66,7 @@ func (target *targetWorker) connect() error {
 
 func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retryDelay time.Duration) (time.Duration, error) {
 	scan, err := p.store.GetAvailableScan(target.ID, time.Now().Add(-p.minimumAge))
-	if errors.Is(err, autoscan.ErrNoScans) {
+	if errors.Is(err, errNoScans) {
 		if retryDelay > 0 {
 			return pollInterval, p.store.clearIdleRetry(target.ID)
 		}

@@ -94,6 +94,10 @@ func (p *Processor) Run(ctx context.Context) {
 	workers.Wait()
 }
 
+// errAnchorUnavailable means that an anchor file is missing. Delivery waits
+// until every anchor is available.
+var errAnchorUnavailable = errors.New("anchor file is unavailable")
+
 // anchorTimeout limits how long a delivery waits for the anchor check.
 const anchorTimeout = 10 * time.Second
 
@@ -107,7 +111,7 @@ func (p *Processor) waitForAnchors(ctx context.Context) error {
 	defer cancel()
 	err := p.probeAnchors().wait(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("anchor check did not finish within %v: %w", anchorTimeout, autoscan.ErrAnchorUnavailable)
+		return fmt.Errorf("anchor check did not finish within %v: %w", anchorTimeout, errAnchorUnavailable)
 	}
 	return err
 }
@@ -156,7 +160,7 @@ func (p *Processor) checkAnchors() error {
 	for _, anchor := range p.anchors {
 		info, err := os.Stat(anchor)
 		if err != nil || info.IsDir() {
-			return fmt.Errorf("%s: %w", anchor, autoscan.ErrAnchorUnavailable)
+			return fmt.Errorf("%s: %w", anchor, errAnchorUnavailable)
 		}
 	}
 	return nil

@@ -10,9 +10,10 @@ import (
 
 type Config = webhook.Config
 
-// New creates an autoscan-compatible HTTP Trigger for Readarr webhooks.
-func New(c Config) (autoscan.HTTPTrigger, error) {
-	return webhook.New(c, parse, now)
+// New returns the HTTP handler for Readarr webhooks. It sends the scans to
+// callback.
+func New(c Config, callback autoscan.ProcessorFunc) (http.Handler, error) {
+	return webhook.New(c, parse, now, callback)
 }
 
 type readarrEvent struct {

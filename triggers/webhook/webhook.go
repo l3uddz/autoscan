@@ -46,9 +46,10 @@ type Event struct {
 // responds with 400 Bad Request.
 type Parser func(r *http.Request) (Event, error)
 
-// New returns an HTTPTrigger for parse. It uses the priority, the rewrite
-// rules, and the verbosity of c. now returns the scan time.
-func New(c Config, parse Parser, now func() time.Time) (autoscan.HTTPTrigger, error) {
+// New returns the webhook handler for parse. It uses the priority, the
+// rewrite rules, and the verbosity of c. now returns the scan time. The
+// handler sends the scans to callback.
+func New(c Config, parse Parser, now func() time.Time, callback autoscan.ProcessorFunc) (http.Handler, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
 		return nil, err
@@ -56,19 +57,15 @@ func New(c Config, parse Parser, now func() time.Time) (autoscan.HTTPTrigger, er
 
 	level, hasLevel := autoscan.ParseVerbosity(c.Verbosity)
 
-	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
-		return handler{
-			priority: c.Priority,
-			rewrite:  rewriter,
-			level:    level,
-			hasLevel: hasLevel,
-			parse:    parse,
-			now:      now,
-			callback: callback,
-		}
-	}
-
-	return trigger, nil
+	return handler{
+		priority: c.Priority,
+		rewrite:  rewriter,
+		level:    level,
+		hasLevel: hasLevel,
+		parse:    parse,
+		now:      now,
+		callback: callback,
+	}, nil
 }
 
 type handler struct {

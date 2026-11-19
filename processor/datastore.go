@@ -18,6 +18,9 @@ type datastore struct {
 	db *sql.DB
 }
 
+// errNoScans means that a target has no scan ready for delivery.
+var errNoScans = errors.New("no scans currently available")
+
 type queuedScan struct {
 	autoscan.Scan
 	revision string
@@ -152,9 +155,9 @@ func (store *datastore) GetAvailableScan(target string, olderThan time.Time) (qu
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time, &scan.revision)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return scan, autoscan.ErrNoScans
+		return scan, errNoScans
 	case err != nil:
-		return scan, fmt.Errorf("get matching: %s: %w", err, autoscan.ErrFatal)
+		return scan, fmt.Errorf("get matching: %w", err)
 	}
 
 	return scan, nil

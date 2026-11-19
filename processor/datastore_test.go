@@ -156,7 +156,7 @@ func TestGetAvailableScan(t *testing.T) {
 				{Folder: "1", Time: testTime.Add(-1 * time.Minute)},
 				{Folder: "2", Time: testTime.Add(-1 * time.Minute)},
 			},
-			WantErr: autoscan.ErrNoScans,
+			WantErr: errNoScans,
 		},
 		{
 			Name:   "Retrieves folder if older than minimum age",
@@ -393,8 +393,8 @@ func TestGetAvailableScanComparesTimesAcrossOffsets(t *testing.T) {
 
 			scan, err := store.GetAvailableScan("target", tc.OlderThan)
 			if tc.WantFolder == "" {
-				if !errors.Is(err, autoscan.ErrNoScans) {
-					t.Fatalf("available scan = %+v, %v, want %v", scan.Scan, err, autoscan.ErrNoScans)
+				if !errors.Is(err, errNoScans) {
+					t.Fatalf("available scan = %+v, %v, want %v", scan.Scan, err, errNoScans)
 				}
 				return
 			}
@@ -452,7 +452,7 @@ func TestStartupStoresEarlierScanTimesInUTC(t *testing.T) {
 	var delivered []string
 	for {
 		scan, err := store.GetAvailableScan("target", time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC))
-		if errors.Is(err, autoscan.ErrNoScans) {
+		if errors.Is(err, errNoScans) {
 			break
 		}
 		if err != nil {

@@ -3,7 +3,6 @@ package autoscan
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"regexp"
 	"time"
 )
@@ -18,15 +17,8 @@ type Scan struct {
 	Time     time.Time
 }
 
+// A ProcessorFunc receives the scans of a trigger.
 type ProcessorFunc func(...Scan) error
-
-type Trigger func(ProcessorFunc)
-
-// A HTTPTrigger is a Trigger which does not run in the background,
-// and instead returns a http.Handler.
-//
-// This http.Handler should be added to the autoscan router in cmd/autoscan.
-type HTTPTrigger func(ProcessorFunc) http.Handler
 
 // A Target receives a Scan from the Processor and translates the Scan
 // into a format understood by the target.
@@ -35,21 +27,8 @@ type Target interface {
 	Available() error
 }
 
-var (
-	// ErrTargetUnavailable indicates that a target cannot accept scans.
-	ErrTargetUnavailable = errors.New("target unavailable")
-
-	// ErrFatal indicates a severe problem related to development.
-	ErrFatal = errors.New("fatal error")
-
-	// ErrNoScans indicates that a target has no scan ready for delivery.
-	ErrNoScans = errors.New("no scans currently available")
-
-	// ErrAnchorUnavailable indicates that an Anchor file is
-	// not available on the file system. Processing should halt
-	// until all anchors are available.
-	ErrAnchorUnavailable = errors.New("anchor file is unavailable")
-)
+// ErrTargetUnavailable indicates that a target cannot accept scans.
+var ErrTargetUnavailable = errors.New("target unavailable")
 
 type Rewrite struct {
 	From string `yaml:"from"`

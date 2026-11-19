@@ -2,15 +2,12 @@
 package media
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 )
 
 // A Library is one folder of a media server library.
@@ -53,9 +50,9 @@ func Names(libraries []Library) []string {
 	return names
 }
 
-// NewUpdatedRequest creates the Emby and Jellyfin request that reports a
-// changed path: POST /Library/Media/Updated. The request names no library.
-func NewUpdatedRequest(baseURL string, path string, updateType string) (*http.Request, error) {
+// SendUpdated reports a changed path to Emby or Jellyfin with
+// POST /Library/Media/Updated. The request names no library.
+func SendUpdated(c *httpapi.Client, path string, updateType string) error {
 	type update struct {
 		Path       string `json:"path"`
 		UpdateType string `json:"updateType"`
@@ -67,18 +64,7 @@ func NewUpdatedRequest(baseURL string, path string, updateType string) (*http.Re
 		Updates: []update{{Path: path, UpdateType: updateType}},
 	}
 
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed encoding scan request payload: %v: %w", err, autoscan.ErrFatal)
-	}
-
-	req, err := http.NewRequest("POST", autoscan.JoinURL(baseURL, "Library", "Media", "Updated"), bytes.NewBuffer(b))
-	if err != nil {
-		return nil, fmt.Errorf("failed creating scan request: %w", autoscan.TargetRequestError(err, autoscan.ErrFatal))
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	return req, nil
+	return c.PostJSON("Library/Media/Updated", payload)
 }
 
 // A PathAPI is a media server client whose scan request takes only a path.
