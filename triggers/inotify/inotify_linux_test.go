@@ -3,6 +3,8 @@
 package inotify
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,9 +17,9 @@ import (
 	"github.com/l3uddz/autoscan"
 )
 
-// newWatchingDaemon returns a daemon that watches root with no rewrite and
+// newWatchingDaemon returns a trigger that watches root with no rewrite and
 // no filter.
-func newWatchingDaemon(t *testing.T, root string) *daemon {
+func newWatchingDaemon(t *testing.T, root string) *Trigger {
 	t.Helper()
 
 	rewriter, err := autoscan.NewRewriter(nil)
@@ -36,8 +38,8 @@ func newWatchingDaemon(t *testing.T, root string) *daemon {
 	}
 	t.Cleanup(func() { _ = watcher.Close() })
 
-	d := &daemon{
-		paths:   []path{{Path: root, Rewriter: rewriter, Allowed: filterer}},
+	d := &Trigger{
+		paths:   []*path{{Path: root, Rewriter: rewriter, Allowed: filterer}},
 		watcher: watcher,
 		log:     zerolog.Nop(),
 	}
@@ -51,7 +53,7 @@ func newWatchingDaemon(t *testing.T, root string) *daemon {
 
 // receiveScans handles the events of d until no event arrives for a short
 // time. It returns the paths that the events would queue.
-func receiveScans(t *testing.T, d *daemon) []string {
+func receiveScans(t *testing.T, d *Trigger) []string {
 	t.Helper()
 
 	var scans []string
@@ -93,7 +95,7 @@ func rename(t *testing.T, from, to string) {
 	}
 }
 
-func assertWatched(t *testing.T, d *daemon, paths ...string) {
+func assertWatched(t *testing.T, d *Trigger, paths ...string) {
 	t.Helper()
 
 	watched := d.watcher.WatchList()
@@ -147,5 +149,169 @@ func TestScanPathEmptyNewDirectory(t *testing.T) {
 	scans := receiveScans(t, d)
 	if want := []string{season}; !slices.Equal(scans, want) {
 		t.Errorf("Got scans %q, want %q", scans, want)
+	}
+}
+
+func newTestTrigger(t *testing.T, roots ...string) *Trigger {
+	t.Helper()
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = watcher.Close() })
+
+	trigger := &Trigger{watcher: watcher, log: zerolog.Nop()}
+	for _, root := range roots {
+		trigger.paths = append(trigger.paths, &path{Path: root})
+	}
+	return trigger
+}
+
+func TestWatchTreeSkipsUnreadableSubdirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a directory without permissions")
+	}
+
+	root := t.TempDir()
+	locked, open := filepath.Join(root, "locked"), filepath.Join(root, "open")
+	mkdirAll(t, filepath.Join(locked, "inner"))
+	mkdirAll(t, open)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	trigger := newTestTrigger(t, root)
+	if _, err := trigger.watchTree(root); err != nil {
+		t.Fatalf("watchTree returned %v, want the unreadable directory skipped", err)
+	}
+
+	watched := trigger.watcher.WatchList()
+	assertWatched(t, trigger, root, open)
+	if slices.Contains(watched, filepath.Join(locked, "inner")) {
+		t.Errorf("Watched a directory below the unreadable directory: %q", watched)
+	}
+}
+
+func TestWatchTreeFailsForMissingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	trigger := newTestTrigger(t, root)
+
+	if _, err := trigger.watchTree(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("watchTree returned %v, want a not-exist error", err)
+	}
+}
+
+func TestStatusCountsWatchedPaths(t *testing.T) {
+	watched := t.TempDir()
+	trigger := newTestTrigger(t, watched, filepath.Join(t.TempDir(), "missing"))
+
+	trigger.watchPath(trigger.paths[0])
+
+	if got, want := trigger.Status(), (Status{Paths: 2, Watching: 1}); got != want {
+		t.Errorf("Status = %+v, want %+v", got, want)
+	}
+}
+
+func TestWatchTreeFailsForFileRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "file")
+	writeFile(t, root)
+	trigger := newTestTrigger(t, root)
+
+	if _, err := trigger.watchTree(root); err == nil {
+		t.Error("watchTree returned no error for a root that is a file")
+	}
+}
+
+func TestRemovedRootIsWatchedAgain(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "media")
+	mkdirAll(t, root)
+	trigger := newTestTrigger(t, root)
+	trigger.watchPath(trigger.paths[0])
+
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "the removed root to be not watched", func() bool {
+		select {
+		case event := <-trigger.watcher.Events:
+			trigger.rewatchLostRoot(event)
+		case <-time.After(10 * time.Millisecond):
+		}
+		return trigger.Status().Watching == 0
+	})
+
+	mkdirAll(t, root)
+	waitFor(t, 2*watchRetryMin, "the recreated root to be watched", func() bool {
+		return trigger.Status().Watching == 1
+	})
+	assertWatched(t, trigger, root)
+}
+
+func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for !done() {
+		if time.Now().After(deadline) {
+			t.Fatalf("Timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRenamedRootReleasesSubdirectoryWatches(t *testing.T) {
+	parent := t.TempDir()
+	root, nested := filepath.Join(parent, "media"), filepath.Join(parent, "media", "tv")
+	mkdirAll(t, filepath.Join(nested, "Show"))
+	trigger := newTestTrigger(t, root, nested)
+	trigger.watchPath(trigger.paths[0])
+	trigger.watchPath(trigger.paths[1])
+
+	rename(t, root, filepath.Join(parent, "media.old"))
+	waitFor(t, 2*time.Second, "the renamed root to be not watched", func() bool {
+		select {
+		case event := <-trigger.watcher.Events:
+			trigger.rewatchLostRoot(event)
+		case <-time.After(10 * time.Millisecond):
+		}
+		return trigger.Status().Watching == 0
+	})
+
+	for _, name := range trigger.watcher.WatchList() {
+		if isWithin(name, root) {
+			t.Errorf("Watch %q below the renamed root remains", name)
+		}
+	}
+}
+
+func TestRenamedAncestorLosesNestedRoot(t *testing.T) {
+	parent := t.TempDir()
+	media := filepath.Join(parent, "media")
+	show := filepath.Join(media, "tv", "Show")
+	mkdirAll(t, show)
+	trigger := newTestTrigger(t, media, show)
+	trigger.watchPath(trigger.paths[0])
+	trigger.watchPath(trigger.paths[1])
+
+	// Moving media/tv out of media loses the root media/tv/Show, but not media.
+	rename(t, filepath.Join(media, "tv"), filepath.Join(parent, "tv"))
+	waitFor(t, 2*time.Second, "the nested root to be not watched", func() bool {
+		select {
+		case event := <-trigger.watcher.Events:
+			trigger.rewatchLostRoot(event)
+		case <-time.After(10 * time.Millisecond):
+		}
+		return !trigger.paths[1].watching.Load()
+	})
+
+	if !trigger.paths[0].watching.Load() {
+		t.Error("The root above the moved directory is marked as not watched")
+	}
+	for _, name := range trigger.watcher.WatchList() {
+		if isWithin(name, filepath.Join(media, "tv")) {
+			t.Errorf("Watch %q below the moved directory remains", name)
+		}
 	}
 }

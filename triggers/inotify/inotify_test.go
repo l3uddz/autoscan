@@ -88,9 +88,9 @@ func TestGetPathObject(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			d := daemon{}
+			d := Trigger{}
 			for _, p := range tc.Paths {
-				d.paths = append(d.paths, path{Path: p})
+				d.paths = append(d.paths, &path{Path: p})
 			}
 
 			got, err := d.getPathObject(tc.Event)

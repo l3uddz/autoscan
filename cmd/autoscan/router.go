@@ -16,6 +16,7 @@ import (
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/processor"
+	"github.com/l3uddz/autoscan/triggers/inotify"
 	"github.com/l3uddz/autoscan/triggers/lidarr"
 	"github.com/l3uddz/autoscan/triggers/manual"
 	"github.com/l3uddz/autoscan/triggers/radarr"
@@ -23,9 +24,10 @@ import (
 	"github.com/l3uddz/autoscan/triggers/sonarr"
 )
 
-// getRouter returns the HTTP routes. It returns an error if a trigger
-// configuration is not valid.
-func getRouter(c config, proc *processor.Processor) (chi.Router, error) {
+// getRouter returns the HTTP routes. GET /status also reports watchers,
+// the inotify triggers. It returns an error if a trigger configuration is
+// not valid.
+func getRouter(c config, proc *processor.Processor, watchers []*inotify.Trigger) (chi.Router, error) {
 	manualTrigger, err := manual.New(c.Triggers.Manual, proc.Add)
 	if err != nil {
 		return nil, fmt.Errorf("trigger manual: %w", err)
@@ -56,7 +58,7 @@ func getRouter(c config, proc *processor.Processor) (chi.Router, error) {
 			r.Use(middleware.BasicAuth("Autoscan 1.x", map[string]string{c.Auth.Username: c.Auth.Password}))
 		}
 	})
-	protected.Get("/status", processorStatusHandler(proc))
+	protected.Get("/status", statusHandler(proc, watchers))
 
 	// HTTP-Triggers
 	protected.Route("/triggers", func(r chi.Router) {
@@ -100,11 +102,29 @@ func healthHandler(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusOK)
 }
 
-func processorStatusHandler(proc *processor.Processor) http.HandlerFunc {
+// statusReport is the GET /status response. The inotify state does not change
+// can_deliver or the status code, because it does not affect delivery.
+type statusReport struct {
+	processor.Status
+	Inotify []inotifyStatus `json:"inotify"`
+}
+
+type inotifyStatus struct {
+	ID string `json:"id"`
+	inotify.Status
+}
+
+func statusHandler(proc *processor.Processor, watchers []*inotify.Trigger) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		status := proc.Status(ctx)
+		status := statusReport{Status: proc.Status(ctx), Inotify: make([]inotifyStatus, 0, len(watchers))}
+		for i, watcher := range watchers {
+			status.Inotify = append(status.Inotify, inotifyStatus{
+				ID:     fmt.Sprintf("inotify-%d", i+1),
+				Status: watcher.Status(),
+			})
+		}
 
 		rw.Header().Set("Content-Type", "application/json")
 		rw.Header().Set("Cache-Control", "no-store")

@@ -57,7 +57,8 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
   configuration and an `autoscan.ProcessorFunc`. A webhook trigger returns an
   `http.Handler`. Use `triggers/webhook` for it, and register it in
   `cmd/autoscan/router.go`. A background trigger, such as inotify, returns a
-  function that runs in the background. Start it in `cmd/autoscan/main.go`.
+  value with a `Run` method that runs in the background. Start it in
+  `cmd/autoscan/main.go`.
 - If you add a target, add a package under `targets/`. Register it in
   `cmd/autoscan/main.go`. Send its HTTP requests with the client in
   `targets/internal/httpapi`.

@@ -206,8 +206,9 @@ func main() {
 	defer stop()
 
 	// daemon triggers
+	watchers := make([]*inotify.Trigger, 0, len(c.Triggers.Inotify))
 	for _, t := range c.Triggers.Inotify {
-		run, err := inotify.New(t, proc.Add)
+		watcher, err := inotify.New(t, proc.Add)
 		if err != nil {
 			log.Fatal().
 				Err(err).
@@ -215,11 +216,12 @@ func main() {
 				Msg("Failed initialising trigger")
 		}
 
-		go run()
+		watchers = append(watchers, watcher)
+		go watcher.Run()
 	}
 
 	// http triggers
-	router, err := getRouter(c, proc)
+	router, err := getRouter(c, proc, watchers)
 	if err != nil {
 		log.Fatal().
 			Err(err).
