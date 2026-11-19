@@ -276,12 +276,15 @@ func TestParentFolder(t *testing.T) {
 		"/TV/Show/Season 1/episode.mkv":   "/TV/Show/Season 1",
 		`/TV/Show/Season 1/a\b.mkv`:       "/TV/Show/Season 1",
 		"/episode.mkv":                    "/",
+		"/music/Artist/./Album/01.flac":   "/music/Artist/Album",
+		"/TV//Show/episode.mkv":           "/TV/Show",
 		`C:\TV\Show\Season 1\episode.mkv`: `C:\TV\Show\Season 1`,
 		"C:/TV/Show/episode.mkv":          "C:/TV/Show",
 		`C:\episode.mkv`:                  `C:\`,
 		"C:/episode.mkv":                  "C:/",
 		`\\server\media\Show\episode.mkv`: `\\server\media\Show`,
 		"episode.mkv":                     "",
+		"C:episode.mkv":                   "",
 		"":                                "",
 	} {
 		if got := ParentFolder(file); got != want {

@@ -222,19 +222,22 @@ func windowsPath(p string) bool {
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.
-// A root folder, such as "/" or "C:\", keeps its separator. ParentFolder
-// returns "" for a path without a folder.
+// It cleans a Unix path, as path.Dir does. A root folder, such as "/" or
+// "C:\", keeps its separator. ParentFolder returns "" for a path without a
+// folder.
 func ParentFolder(file string) string {
-	separators := "/"
-	if windowsPath(file) {
-		separators = `/\`
+	if !windowsPath(file) {
+		if !strings.Contains(file, "/") {
+			return ""
+		}
+		return path.Dir(file)
 	}
 
-	i := strings.LastIndexAny(file, separators)
+	i := strings.LastIndexAny(file, `/\`)
 	switch {
 	case i < 0:
 		return ""
-	case i == 0, i == 2 && windowsPath(file):
+	case i == 2 && file[1] == ':':
 		return file[:i+1]
 	default:
 		return file[:i]
