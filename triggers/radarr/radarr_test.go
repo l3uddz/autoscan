@@ -135,6 +135,28 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Rename Event with Windows previous paths",
+			Given{
+				Config:  Config{Name: "radarr", Priority: 5},
+				Fixture: "testdata/rename_windows.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   `C:\Movies\Deadpool (2016)`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+					{
+						Folder:   `C:\Movies\Deadpool`,
+						Priority: 5,
+						Time:     currentTime,
+					},
+				},
+			},
+		},
+		{
 			"Returns bad request on invalid JSON",
 			Given{
 				Config:  standardConfig,
