@@ -1,9 +1,11 @@
 name: Build
 
+# Pushes build master and v* tags. Every other branch builds through its PR
+# into master, so only one run publishes each branch tag.
 on:
   push:
     branches:
-      - "*"
+      - master
     tags:
       - "v*"
   pull_request:
@@ -13,6 +15,15 @@ on:
 # Only the release job writes repository contents. Every other job reads.
 permissions:
   contents: read
+
+# A new run cancels the older run for the same ref, so an older commit never
+# replaces the image of a newer commit.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: l3uddz/autoscan
 
 jobs:
   # govulncheck is separate from the required build job, so that a new
@@ -39,12 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # dependencies
-      - name: qemu
-        if: github.event.pull_request.head.repo.fork == false
-        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
-
       - name: buildx
-        if: github.event.pull_request.head.repo.fork == false
+        if: ${{ !github.event.pull_request.head.repo.fork }}
         uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
 
       # checkout
@@ -72,11 +79,15 @@ jobs:
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-cache-mod
+            ${{ runner.os }}-go-
 
       # vendor
       - name: vendor
         run: mise run vendor
+
+      # go mod tidy must not change the committed module files.
+      - name: tidy check
+        run: git diff --exit-code -- go.mod go.sum
 
       # test
       - name: tests
@@ -89,12 +100,16 @@ jobs:
       - name: git status
         run: git status
 
-      # build reqs
-      - name: branch name
-        id: branch-names
-        uses: tj-actions/branch-names@5250492686b253f06fa55861556d1027b067aeb5 # v9.0.2
-        with:
-          replace_slashes_with_hyphens: "true"
+      # The branch tag comes from docker-branch-tag.sh, which cleanup.yml
+      # also uses. A fork PR publishes no image, so it needs no tag.
+      - name: image tag
+        id: image
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          tag="$(.github/scripts/docker-branch-tag.sh "$BRANCH")"
+          echo "tag=$IMAGE:$tag" >> "$GITHUB_OUTPUT"
 
       # build
       - name: build
@@ -115,7 +130,7 @@ jobs:
 
       # docker login
       - name: docker login
-        if: github.event.pull_request.head.repo.fork == false
+        if: ${{ !github.event.pull_request.head.repo.fork }}
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
@@ -124,7 +139,7 @@ jobs:
 
       # docker build (branch)
       - name: docker - build branch
-        if: github.event.pull_request.head.repo.fork == false
+        if: ${{ !github.event.pull_request.head.repo.fork }}
         uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
         with:
           context: .
@@ -134,14 +149,12 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            l3uddz/autoscan:${{ steps.branch-names.outputs.current_branch }}
+          tags: ${{ steps.image.outputs.tag }}
 
       # cleanup
       - name: cleanup
-        if: github.event.pull_request.head.repo.fork == false
-        run: |
-          rm -f ${HOME}/.docker/config.json
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        run: rm -f "$HOME/.docker/config.json"
 
   # release publishes the GitHub release and the release Docker tags for a v*
   # tag. It is the only job that writes repository contents.
@@ -152,9 +165,6 @@ jobs:
       contents: write
     steps:
       # dependencies
-      - name: qemu
-        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
-
       - name: buildx
         uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
 
@@ -178,11 +188,19 @@ jobs:
       - name: lint
         run: mise run lint
 
-      - name: tag name
-        id: branch-names
-        uses: tj-actions/branch-names@5250492686b253f06fa55861556d1027b067aeb5 # v9.0.2
-        with:
-          strip_tag_prefix: "v"
+      # This step runs before publish, so a version that is not a valid
+      # Docker tag stops the run before goreleaser makes a GitHub release.
+      - name: version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version="${REF_NAME#v}"
+          if [[ ! "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::version '$version' is not a valid Docker tag"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # publish
       - name: publish
@@ -224,11 +242,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            l3uddz/autoscan:${{ steps.branch-names.outputs.tag }}
-            l3uddz/autoscan:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE }}:latest
 
       # cleanup
       - name: cleanup
         if: always()
-        run: |
-          rm -f ${HOME}/.docker/config.json
+        run: rm -f "$HOME/.docker/config.json"

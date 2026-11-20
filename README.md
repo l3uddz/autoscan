@@ -650,14 +650,16 @@ You can set these rules for each trigger and each target in the configuration fi
 #### Version Tags
 
 The Autoscan Docker image has different versions, which are available as tags.
-The `latest` tag usually has the latest stable version.
-The other tags are under development.
+The `latest` tag has the latest stable version.
+The `master` tag and the pull request tags are under development.
 Use them with caution.
 
-|  Tag   | Description                                        |
-| :----: | -------------------------------------------------- |
-| latest | Latest stable version from a tagged GitHub release |
-| master | Most recent GitHub master commit                   |
+|     Tag     | Description                                                                                                  |
+| :---------: | ------------------------------------------------------------------------------------------------------------ |
+|   latest    | Latest stable version from a tagged GitHub release                                                           |
+| `<version>` | One tagged GitHub release, for example `1.5.2`                                                               |
+|   master    | Most recent GitHub master commit                                                                             |
+| `<branch>`  | An open pull request. Each character that a Docker tag does not allow, such as `/`, becomes `-`. If you delete the branch, CI removes the tag. |
 
 #### Usage
 
