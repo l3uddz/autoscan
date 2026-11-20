@@ -25,11 +25,9 @@ jobs:
       - name: checkout
         uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
 
-      - name: go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: stable
-          check-latest: true
+      # tools: go and goreleaser, at the versions in mise.toml
+      - name: mise
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
@@ -41,25 +39,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # dependencies
-      - name: goreleaser
-        uses: goreleaser/goreleaser-action@b508e2e3ef3b19d4e4146d4f8fb3ba9db644a757 # v3.2.0
-        with:
-          install-only: true
-          version: 1.7.0
-
-      - name: goreleaser info
-        run: goreleaser -v
-
-      - name: task
-        uses: arduino/setup-task@e26d8975574116b0097a1161e0fe16ba75d84c1c # v1.0.3
-        with:
-          # Without a token, the release lookup uses the shared runner IP
-          # address and can hit the GitHub API rate limit.
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: task info
-        run: task --version
-
       - name: qemu
         if: github.event.pull_request.head.repo.fork == false
         uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
@@ -74,18 +53,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # setup go
-      - name: go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: stable
-          check-latest: true
-          cache: false
+      # tools: go and goreleaser, at the versions in mise.toml
+      - name: mise
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
-      - name: go info
+      - name: tool info
         run: |
           go version
           go env
+          goreleaser --version
 
       # cache
       - name: cache-go
@@ -98,24 +74,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-cache-mod
 
-      - name: cache-task
-        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3.5.0
-        with:
-          path: .task/**/*
-          key: ${{ runner.os }}-go-task
-
       # vendor
       - name: vendor
-        run: |
-          task vendor
+        run: mise run vendor
 
       # test
       - name: tests
-        run: |
-          task test
+        run: mise run test
 
       - name: lint
-        run: task lint
+        run: mise run lint
 
       # git status
       - name: git status
@@ -130,8 +98,7 @@ jobs:
 
       # build
       - name: build
-        run: |
-          task snapshot
+        run: mise run snapshot
 
       # artifacts
       - name: artifact_linux
@@ -185,17 +152,6 @@ jobs:
       contents: write
     steps:
       # dependencies
-      - name: goreleaser
-        uses: goreleaser/goreleaser-action@b508e2e3ef3b19d4e4146d4f8fb3ba9db644a757 # v3.2.0
-        with:
-          install-only: true
-          version: 1.7.0
-
-      - name: task
-        uses: arduino/setup-task@e26d8975574116b0097a1161e0fe16ba75d84c1c # v1.0.3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: qemu
         uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
 
@@ -208,23 +164,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      # setup go
-      - name: go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: stable
-          check-latest: true
-          cache: false
+      # tools: go and goreleaser, at the versions in mise.toml
+      - name: mise
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
       # vendor, test, and lint before the release
       - name: vendor
-        run: task vendor
+        run: mise run vendor
 
       - name: tests
-        run: task test
+        run: mise run test
 
       - name: lint
-        run: task lint
+        run: mise run lint
 
       - name: tag name
         id: branch-names
@@ -237,8 +189,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REF: ${{ github.ref }}
-        run: |
-          task publish
+        run: mise run publish
 
       # artifacts
       - name: artifact_linux

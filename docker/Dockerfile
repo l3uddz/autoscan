@@ -1,6 +1,5 @@
 ARG TARGETOS
 ARG TARGETARCH
-ARG TARGETVARIANT
 
 FROM alpine:3.24 AS rootfs
 RUN apk add --no-cache ca-certificates tzdata
@@ -9,7 +8,6 @@ FROM scratch
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG TARGETVARIANT
 
 ENV \
   PATH="/app" \
@@ -21,7 +19,9 @@ ENV \
 COPY --from=rootfs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=rootfs /usr/share/zoneinfo /usr/share/zoneinfo
 
-COPY ["dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}/autoscan", "/app/autoscan"]
+# goreleaser v2 adds a suffix to each build folder: amd64_v1, arm64_v8.0
+# and arm_7. The pattern matches exactly one folder for each platform.
+COPY ["dist/autoscan_${TARGETOS}_${TARGETARCH}_*/autoscan", "/app/autoscan"]
 
 VOLUME ["/config"]
 

@@ -8,4 +8,4 @@ dist/
 /autoscan
 /config.yml
 
-/.task/
+mise.local.toml
