@@ -24,7 +24,7 @@ A [Docker image](#docker) is also available.
 
 You can also build the Autoscan binary yourself.
 Before you build it, make sure that your machine runs Linux, macOS, or WSL2.
-Also make sure that [Go](https://golang.org/doc/install) 1.26 or later is installed.
+Also make sure that [Go](https://golang.org/doc/install) 1.27 or later is installed.
 
 To build the binary, do these steps in a terminal:
 
