@@ -54,9 +54,32 @@ snapshot:
   version_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch }}"
 
 # Changelog
+# Release notes group the commits since the last tag by their Conventional
+# Commit type. A commit goes to the first group that matches it, and
+# "order" sets where each group appears. The patterns see only the subject
+# line, so a breaking change needs "!" in its subject.
 changelog:
+  use: git
+  sort: asc
+  abbrev: 7
+  format: "{{ .Message }} ({{ .SHA }})"
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^Merge branch"
+      - "^docs(\\(.*\\))?!?:"
+      - "^test(\\(.*\\))?!?:"
+      - "^Merge "
+  groups:
+    - title: Breaking changes
+      regexp: '^[a-z]+(\([^)]*\))?!:'
+      order: 0
+    - title: Features
+      regexp: '^feat(\([^)]*\))?:'
+      order: 1
+    - title: Bug fixes
+      regexp: '^fix(\([^)]*\))?:'
+      order: 2
+    - title: Performance
+      regexp: '^perf(\([^)]*\))?:'
+      order: 3
+    - title: Other changes
+      order: 999
