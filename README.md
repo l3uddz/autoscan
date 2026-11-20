@@ -659,7 +659,7 @@ Use them with caution.
 |   latest    | Latest stable version from a tagged GitHub release                                                           |
 | `<version>` | One tagged GitHub release, for example `1.5.2`                                                               |
 |   master    | Most recent GitHub master commit                                                                             |
-| `<branch>`  | An open pull request. Each character that a Docker tag does not allow, such as `/`, becomes `-`. CI removes the tag when the branch is deleted. |
+| `<branch>`  | An open pull request. Each character that a Docker tag does not allow, such as `/`, becomes `-`. If you delete the branch, CI removes the tag. |
 
 #### Usage
 
