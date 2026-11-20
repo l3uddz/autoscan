@@ -34,6 +34,11 @@ To build the binary, do these steps in a terminal:
 
 The build makes a binary with the name `autoscan` in the root directory of the project.
 To start Autoscan, run `./autoscan`.
+
+If you use [mise](https://mise.jdx.dev), you do not need to install Go yourself.
+Run `mise install` in the root directory of the repository to install the Go version from `mise.toml`.
+Then run `mise run build`.
+This build puts the binary in `dist/autoscan_<os>_<arch>/autoscan`.
 To make Autoscan available from all directories, move the binary to `/bin` or `/usr/local/bin`.
 
 To debug Autoscan, add the `-v` flag for debug mode.

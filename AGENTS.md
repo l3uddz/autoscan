@@ -67,25 +67,29 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
   `2_<name>.sql` to `processor/migrations/`. Do not edit a migration that a
   release already contains.
 - If you change user-facing behavior or configuration, update `README.md`.
-- The Go version comes from `go.mod`. Do not lower it.
+- The Go version comes from `go.mod`. Do not lower it. `mise.toml` pins the
+  same minor release for local work and CI. If you change one, change both.
 
 ## Checks
 
-You need Go and [Task](https://taskfile.dev). The required `build` job runs the
-following commands in order before packaging. Run the same commands before you
-push.
+You need [mise](https://mise.jdx.dev). Run `mise install` once to install
+the Go and goreleaser versions from `mise.toml`. CI installs the same
+versions. Run `mise tasks` to list the tasks.
+
+The required `build` job runs the following commands in order before
+packaging. Run the same commands before you push.
 
 ```sh
-task vendor
-task test
-task lint
+mise run vendor
+mise run test
+mise run lint
 ```
 
-`task vendor` creates `vendor/` and runs `go mod tidy`. Git ignores `vendor/`.
-Do not commit it. If `go mod tidy` changes `go.mod` or `go.sum`, commit
-those changes with the change that caused them.
+`mise run vendor` runs `go mod tidy` and then creates `vendor/`. Git ignores
+`vendor/`. Do not commit it. If `go mod tidy` changes `go.mod` or `go.sum`,
+commit those changes with the change that caused them.
 
-`task lint` runs `gofmt` on tracked Go files, then `go vet ./...`, and then a
+`mise run lint` runs `gofmt` on tracked Go files, then `go vet ./...`, and then a
 pinned `staticcheck`. If `gofmt` lists a file, the task fails. A lint failure
 fails the `build` job.
 
@@ -96,8 +100,8 @@ unrelated PRs. Look at its result in each PR.
 The workflows pin each action to a commit SHA, with the version in a comment.
 If you update an action, update the SHA and the comment together.
 
-`task build` makes a local binary in `dist/`.
-`task snapshot` needs goreleaser 1.7.0, which CI uses.
+`mise run build` makes a local binary in `dist/`.
+`mise run snapshot` makes the release binaries in `dist/` with goreleaser.
 
 ## CI side effects
 

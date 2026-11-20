@@ -1,4 +1,6 @@
 # https://goreleaser.com
+version: 2
+
 project_name: autoscan
 
 # Build
@@ -16,7 +18,7 @@ builds:
       - arm64
       - arm
     goarm:
-      - 7
+      - "7"
     ldflags:
       - -s -w
       - -X "main.Version={{ .Version }}"
@@ -39,7 +41,8 @@ universal_binaries:
 archives:
   -
     name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
-    format: "binary"
+    formats:
+      - binary
 
 # Checksum
 checksum:
@@ -48,7 +51,7 @@ checksum:
 
 # Snapshot
 snapshot:
-  name_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch  }}"
+  version_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch }}"
 
 # Changelog
 changelog:
