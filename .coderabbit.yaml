@@ -72,7 +72,7 @@ reviews:
         test payloads belong in the testdata directory of the trigger package.
     - path: ".github/workflows/**"
       instructions: >-
-        The Build workflow publishes the public Docker tag master for pushes
+        The ci workflow publishes the public Docker tag master for pushes
         to master, a branch tag for each PR from this repository, and a GitHub
         release with the version and latest tags for v* tags.
         .github/scripts/docker-branch-tag.sh names the branch tag for the

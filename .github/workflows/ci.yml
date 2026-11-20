@@ -1,4 +1,4 @@
-name: Build
+name: ci
 
 # Pushes build master and v* tags. Every other branch builds through its PR
 # into master, so only one run publishes each branch tag.
@@ -100,7 +100,7 @@ jobs:
       - name: git status
         run: git status
 
-      # The branch tag comes from docker-branch-tag.sh, which cleanup.yml
+      # The branch tag comes from docker-branch-tag.sh, which docker-cleanup.yml
       # also uses. A fork PR publishes no image, so it needs no tag.
       - name: image tag
         id: image

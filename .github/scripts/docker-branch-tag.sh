@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prints the Docker tag for a branch name. build.yml publishes the branch image
-# with this tag, and cleanup.yml removes that tag when the branch is
+# Prints the Docker tag for a branch name. ci.yml publishes the branch image
+# with this tag, and docker-cleanup.yml removes that tag when the branch is
 # deleted. Both workflows use this script, so they always agree. The script
 # runs in a checkout, because it reads the branches on origin.
 set -euo pipefail

@@ -1,4 +1,4 @@
-name: Docker Cleanup
+name: docker-cleanup
 
 on: delete
 
@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # build.yml makes the branch tag with the same script. The script
+          # ci.yml makes the branch tag with the same script. The script
           # fails for a reserved tag or a tag that another branch uses, so
           # the job never removes an image that belongs to something else.
           tag="$(.github/scripts/docker-branch-tag.sh "$BRANCH")"
