@@ -120,13 +120,12 @@ runs CI only after you open a PR into `master`.
 ## Delivery
 
 - The default branch is `master`. It is the only integration branch.
-- Start each change on a short-lived branch from `master`, for example
-  `fix/<issue>-<slug>` or `docs/<issue>-<slug>`.
+- Start each change on a short-lived branch from `master`. Name it
+  `<type>/<issue>-<slug>`, for example `fix/99-sonarr-windows-paths`. Use the
+  commit type that fits the change, such as `feat`, `fix`, `docs`, `build`,
+  or `ci`.
 - Track work in GitHub issues on this repository. If no issue exists, create
   one before you start, or ask the user. Do not invent an issue number.
-- Use Conventional Commits with a lowercase scope, for example
-  `fix(plex): handle missing library sections`. Some older commits have no
-  scope. New commits must have one.
 - The repository allows only merge commits. It deletes the source branch after
   a merge. It allows auto-merge. It has no PR template.
 - The `master protection` ruleset protects `master`. It requires the `build`
@@ -140,7 +139,83 @@ runs CI only after you open a PR into `master`.
   PR title that does not use the Conventional Commits format.
 - If you fix a CodeRabbit finding, reply in its thread. Do not post
   `@coderabbitai approve` or `@coderabbitai resolve` to get an approval.
-- A human approves and merges every PR into `master`. Do not approve, merge,
-  or enable auto-merge for these PRs.
+- Contributors do not approve, merge, or enable auto-merge for a PR into
+  `master`. The maintainer, `l3uddz`, merges it after CodeRabbit approves and
+  the `build` check passes.
+- One exception applies only to the maintainer's own PRs. If `l3uddz` opened
+  the PR, an agent that works for the maintainer enables auto-merge with a
+  merge commit. GitHub then merges the PR after CodeRabbit approves and the
+  `build` check passes. The agent still never approves a PR and never
+  bypasses the ruleset.
 - In a PR into `master`, use `Closes #<id>` only for issues that the PR
   delivers.
+
+## Commits and pull requests
+
+The repository merges with merge commits, so every commit on a branch stays
+in the history of `master`. Each commit subject also becomes one line of the
+release notes. The `changelog` section of `.goreleaser.yml` groups the
+subjects by type: breaking changes, features, bug fixes, performance, and
+other changes. It leaves out `docs` and `test` commits and merge commits. It
+reads only the subject line. Write each subject for a user who reads the
+release notes.
+
+### Commit messages
+
+Use the Conventional Commits format for every commit subject:
+
+```text
+<type>(<scope>)[!]: <summary>
+```
+
+- The type is one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`,
+  `build`, `ci`, `chore`, `style`, or `revert`. Choose it from the change,
+  not from the branch name. `feat` is new behavior, `fix` is a bug fix, and
+  `docs` is documentation only.
+- The scope is required and lowercase. It names the affected area with one
+  word, for example `processor`, `migrate`, `cmd`, `config`, `targets`,
+  `plex`, `emby`, `jellyfin`, `triggers`, `sonarr`, `radarr`, `lidarr`,
+  `readarr`, `manual`, `inotify`, `webhook`, `docker`, `unraid`, `build`,
+  `release`, `tooling`, `readme`, or `agents`. Use `targets` or `triggers`
+  for a change to several packages in that directory. Some older commits
+  have no scope or a scope such as `triggers/sonarr`. New commits use one
+  of the forms above.
+- The summary is a short imperative phrase with no trailing period, for
+  example `handle missing library sections`. The whole subject has at most
+  72 characters.
+- If a commit makes a breaking change, put `!` before the colon, for
+  example `feat(config)!: rename the plex section`. Also explain the impact
+  and the migration in a `BREAKING CHANGE:` footer. The release notes read
+  only the subject. Without `!`, the commit is not listed under breaking
+  changes.
+- Put the reason for the change in the body, after a blank line. Reference
+  only real issues. Keep closing keywords such as `Closes #<id>` out of
+  commit messages.
+- Make one change in each commit. A follow-up fix for a review finding is
+  its own `fix` or `docs` commit, and it appears in the release notes too.
+- Check each new commit subject before you push. After you push a branch,
+  do not rewrite its commits and do not force-push it.
+
+### Merge commits
+
+Keep the default merge commit title. On GitHub, it is `Merge pull request
+#<id> from <branch>`. For a local merge, it is the `Merge branch '<branch>'`
+subject that git writes. Do not write a custom merge commit title, also not
+one in the Conventional Commits format. The release notes leave out only the
+commits whose subject starts with `Merge`.
+
+### Pull requests
+
+- The PR title uses the same format as a commit subject. The CodeRabbit
+  title check fails any other title.
+- Write the description for a reader who did not see your work:
+  - the problem
+  - the change and the resulting behavior
+  - the checks that you ran and their results
+  - the source branch and the target branch
+  - `Closes #<id>` for each issue that the PR delivers
+- Keep local checks, live checks on a real media server, and acceptance that
+  is still open apart. Do not claim a check that did not run.
+- Do not put tokens, server addresses, or other private values in a commit,
+  a PR description, or a comment.
+- If the scope of a PR changes, rewrite its title and description.
