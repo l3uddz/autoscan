@@ -1,7 +1,6 @@
-ARG TARGETOS
-ARG TARGETARCH
-
-FROM alpine:3.24 AS rootfs
+# Certificates and timezone data are the same on every architecture, so this
+# stage runs on the build platform and needs no emulation.
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS rootfs
 RUN apk add --no-cache ca-certificates tzdata
 
 FROM scratch

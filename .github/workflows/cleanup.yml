@@ -2,14 +2,21 @@ name: Docker Cleanup
 
 on: delete
 
-# The job uses Docker Hub credentials and needs no GitHub token permission.
-permissions: {}
+# The job reads the repository for docker-branch-tag.sh and uses Docker Hub
+# credentials to remove the tag.
+permissions:
+  contents: read
 
 jobs:
   cleanup_branch:
     if: github.event.ref_type == 'branch'
     runs-on: ubuntu-latest
     steps:
+      - name: checkout
+        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
+        with:
+          sparse-checkout: .github/scripts
+
       - name: remove docker tag
         shell: bash
         env:
@@ -19,16 +26,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The build workflow names a branch image tag the same way: it
-          # replaces each slash in the branch name with a hyphen.
-          tag="${BRANCH//\//-}"
-
-          # A branch name can hold characters that a Docker tag cannot, such
-          # as curl URL globs. Such a branch has no image, so delete nothing.
-          if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "Branch $BRANCH has no valid Docker tag, nothing to remove"
-            exit 0
-          fi
+          # build.yml makes the branch tag with the same script. The script
+          # fails for a reserved tag or a tag that another branch uses, so
+          # the job never removes an image that belongs to something else.
+          tag="$(.github/scripts/docker-branch-tag.sh "$BRANCH")"
 
           token="$(jq -n --arg username "$DOCKER_USERNAME" --arg password "$DOCKER_PASSWORD" \
               '{username: $username, password: $password}' \

@@ -87,7 +87,8 @@ mise run lint
 
 `mise run vendor` runs `go mod tidy` and then creates `vendor/`. Git ignores
 `vendor/`. Do not commit it. If `go mod tidy` changes `go.mod` or `go.sum`,
-commit those changes with the change that caused them.
+commit those changes with the change that caused them. If `go mod tidy`
+changes the committed files, CI fails.
 
 `mise run lint` runs `gofmt` on tracked Go files, then `go vet ./...`, and then a
 pinned `staticcheck`. If `gofmt` lists a file, the task fails. A lint failure
@@ -106,13 +107,25 @@ If you update an action, update the SHA and the comment together.
 ## CI side effects
 
 The `Build` workflow in `.github/workflows/build.yml` runs on pushes to
-branches with no `/` in the name, on `v*` tags, and on PRs into `master`.
-The push filter `"*"` does not match `/`, so a push to `fix/<issue>-<slug>`
-runs CI only after you open a PR into `master`.
+`master`, on `v*` tags, and on PRs into `master`. A push to another branch,
+such as `fix/<issue>-<slug>`, runs CI only after you open a PR into `master`.
 
 - If a run is not from a fork, CI publishes a public Docker image tag,
-  `l3uddz/autoscan:<branch>`, with slashes replaced by hyphens.
-- If you delete a branch, the `Docker Cleanup` workflow removes its Docker tag.
+  `l3uddz/autoscan:<branch>`. For a PR, the image contains the PR merge
+  commit. `.github/scripts/docker-branch-tag.sh` makes the tag from the
+  branch name. Each character that a Docker tag does not allow, such as `/`,
+  becomes a hyphen. A tag longer than 128 characters is cut and gets a hash
+  suffix.
+- Releases own the tag `latest` and the tags that start with a digit. If a
+  branch name maps to one of these tags, the build fails. Do not give a
+  branch such a name.
+- If two branches on origin map to the same tag, such as `fix/a` and
+  `fix-a`, the build and the cleanup both fail.
+- A new run cancels an older run for the same ref. Only one ref publishes
+  each branch tag: `master` for pushes, or the PR for another branch. An
+  older commit then cannot replace the image of a newer commit.
+- If you delete a branch, the `Docker Cleanup` workflow removes its Docker
+  tag. It uses the same script as the build.
 - If someone pushes a `v*` tag, CI publishes a GitHub release and the Docker
   tags `<version>` and `latest`. Do not create or push tags unless the user
   asks for a release.
