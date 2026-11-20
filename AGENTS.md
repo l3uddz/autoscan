@@ -94,7 +94,7 @@ changes the committed files, CI fails.
 pinned `staticcheck`. If `gofmt` lists a file, the task fails. A lint failure
 fails the `build` job.
 
-A separate `govulncheck` job in the `Build` workflow checks for known
+A separate `govulncheck` job in the `ci` workflow checks for known
 vulnerabilities. It is not a required check, so a new advisory does not block
 unrelated PRs. Look at its result in each PR.
 
@@ -106,7 +106,7 @@ If you update an action, update the SHA and the comment together.
 
 ## CI side effects
 
-The `Build` workflow in `.github/workflows/build.yml` runs on pushes to
+The `ci` workflow in `.github/workflows/ci.yml` runs on pushes to
 `master`, on `v*` tags, and on PRs into `master`. A push to another branch,
 such as `fix/<issue>-<slug>`, runs CI only after you open a PR into `master`.
 
@@ -124,7 +124,7 @@ such as `fix/<issue>-<slug>`, runs CI only after you open a PR into `master`.
 - A new run cancels an older run for the same ref. Only one ref publishes
   each branch tag: `master` for pushes, or the PR for another branch. An
   older commit then cannot replace the image of a newer commit.
-- If you delete a branch, the `Docker Cleanup` workflow removes its Docker
+- If you delete a branch, the `docker-cleanup` workflow removes its Docker
   tag. It uses the same script as the build.
 - If someone pushes a `v*` tag, CI publishes a GitHub release and the Docker
   tags `<version>` and `latest`. Do not create or push tags unless the user
