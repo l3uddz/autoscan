@@ -33,3 +33,21 @@ func TestNewDoesNotLogURLPassword(t *testing.T) {
 		t.Errorf("log output contains the URL password: %s", out)
 	}
 }
+
+func TestIsSupportedVersion(t *testing.T) {
+	for version, want := range map[string]bool{
+		"1.20.0.3125": true,
+		"1.32.5":      true,
+		"2.0":         true,
+		"1.19.9":      false,
+		"0.9":         false,
+		"1":           false,
+		"":            false,
+		"2.x":         false,
+		"x.30":        false,
+	} {
+		if got := isSupportedVersion(version); got != want {
+			t.Errorf("isSupportedVersion(%q) = %v, want %v", version, got, want)
+		}
+	}
+}

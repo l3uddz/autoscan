@@ -36,18 +36,17 @@ func New(ctx context.Context, c Config) (autoscan.Target, error) {
 	return media.NewTarget(ctx, l, c, api)
 }
 
+// isSupportedVersion reports whether version is Plex 1.20 or later. A
+// version whose major or minor part is not a number is not supported.
 func isSupportedVersion(version string) bool {
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
+	majorText, rest, _ := strings.Cut(version, ".")
+	minorText, _, _ := strings.Cut(rest, ".")
+
+	major, majorErr := strconv.Atoi(majorText)
+	minor, minorErr := strconv.Atoi(minorText)
+	if majorErr != nil || minorErr != nil {
 		return false
 	}
 
-	major, _ := strconv.Atoi(parts[0])
-	minor, _ := strconv.Atoi(parts[1])
-
-	if major >= 2 || (major == 1 && minor >= 20) {
-		return true
-	}
-
-	return false
+	return major > 1 || major == 1 && minor >= 20
 }
