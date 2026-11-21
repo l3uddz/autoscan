@@ -43,7 +43,7 @@ To make Autoscan available from all directories, move the binary to `/bin` or `/
 
 To debug Autoscan, add the `-v` flag for debug mode.
 For more detail about the internal behavior, add the `-vv` flag for trace mode.
-Autoscan creates new rotated log files (`activity.log`) with mode `0600` (owner read/write only) and preserves the permissions of an existing log file on rotation.
+Autoscan creates new log files (`activity.log`) with mode `0600` (owner read/write only). On rotation, it creates the replacement using the existing log file's mode, subject to the process `umask`.
 
 ## Overview
 
