@@ -219,14 +219,12 @@ func closeBody(body io.ReadCloser) {
 
 func decodeJSON(r io.Reader, out any) error {
 	limited := &io.LimitedReader{R: r, N: maxResponseBytes + 1}
-	if err := json.NewDecoder(limited).Decode(out); err != nil {
-		if limited.N == 0 {
-			return fmt.Errorf("decoding response: response exceeds %d bytes", maxResponseBytes)
-		}
-		return bodyError("decoding response", err)
-	}
+	err := json.NewDecoder(limited).Decode(out)
 	if limited.N == 0 {
 		return fmt.Errorf("decoding response: response exceeds %d bytes", maxResponseBytes)
+	}
+	if err != nil {
+		return bodyError("decoding response", err)
 	}
 	return nil
 }

@@ -519,23 +519,41 @@ func TestSendReusesKeepAliveConnection(t *testing.T) {
 }
 
 func TestGetJSONRejectsOversizedResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`"`))
-		chunk := strings.Repeat("a", 64<<10)
-		for written := 0; written <= maxResponseBytes; written += len(chunk) {
-			_, _ = w.Write([]byte(chunk))
-		}
-		_, _ = w.Write([]byte(`"`))
-	}))
-	defer srv.Close()
+	t.Run("Accepts response at limit", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`"` + strings.Repeat("a", maxResponseBytes-2) + `"`))
+		}))
+		defer srv.Close()
 
-	c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
-	var out string
-	err := c.GetJSON(t.Context(), &out)
-	if err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("GetJSON returned %v, want a response size limit error", err)
-	}
-	if errors.Is(err, autoscan.ErrTargetUnavailable) {
-		t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized response: %v", err)
-	}
+		c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+		var out string
+		if err := c.GetJSON(t.Context(), &out); err != nil {
+			t.Fatalf("GetJSON returned %v for response at limit", err)
+		}
+		if len(out) != maxResponseBytes-2 {
+			t.Errorf("decoded %d bytes, want %d", len(out), maxResponseBytes-2)
+		}
+	})
+
+	t.Run("Rejects response above limit", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`"`))
+			chunk := strings.Repeat("a", 64<<10)
+			for written := 0; written <= maxResponseBytes; written += len(chunk) {
+				_, _ = w.Write([]byte(chunk))
+			}
+			_, _ = w.Write([]byte(`"`))
+		}))
+		defer srv.Close()
+
+		c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+		var out string
+		err := c.GetJSON(t.Context(), &out)
+		if err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("GetJSON returned %v, want a response size limit error", err)
+		}
+		if errors.Is(err, autoscan.ErrTargetUnavailable) {
+			t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized response: %v", err)
+		}
+	})
 }
