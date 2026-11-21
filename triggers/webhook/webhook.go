@@ -245,7 +245,7 @@ func absolutePath(p string) bool {
 }
 
 // CleanFolder cleans a Unix or Windows folder path while keeping its
-// separator style and preserving Windows drive roots and UNC server/share roots.
+// separator style and preserving Windows drive, UNC, and device volume roots.
 func CleanFolder(dir string) string {
 	if !windowsPath(dir) {
 		return path.Clean(dir)
@@ -256,42 +256,61 @@ func CleanFolder(dir string) string {
 	if len(dir) == 2 || (dir[2] != '/' && dir[2] != '\\') {
 		return dir
 	}
-	cleaned := path.Clean(strings.ReplaceAll(dir[2:], `\`, "/"))
-	if dir[2] == '\\' {
-		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
-	}
-	return dir[:2] + cleaned
+	return cleanRootedSuffix(dir[:2], dir[2:])
 }
 
-// cleanUNC cleans the path suffix below a \\server\share UNC volume root so
-// ".." cannot escape the share. It keeps forward slashes when the path after
-// the leading "\\" uses only forward slashes.
+// cleanUNC cleans the path suffix below a Windows UNC or device volume root
+// (\\server\share, \\?\C:\, \\.\C:\, or \\?\UNC\server\share) while keeping
+// the original volume prefix verbatim and preventing ".." from escaping it.
 func cleanUNC(dir string) string {
-	sep := `\`
-	if !strings.Contains(dir[2:], `\`) {
-		sep = "/"
+	if len(dir) >= 4 && (dir[2] == '?' || dir[2] == '.') && (dir[3] == '\\' || dir[3] == '/') {
+		return cleanDevicePath(dir)
 	}
-	rest := strings.ReplaceAll(dir[2:], `\`, "/")
-	server, afterServer, hasShare := strings.Cut(rest, "/")
-	if server == "" || !hasShare {
+	return cleanSharePath(dir, 2)
+}
+
+func cleanDevicePath(dir string) string {
+	if len(dir) >= 8 && strings.EqualFold(dir[4:7], "UNC") && (dir[7] == '\\' || dir[7] == '/') {
+		return cleanSharePath(dir, 8)
+	}
+	sep := strings.IndexAny(dir[4:], `/\`)
+	if sep <= 0 {
 		return dir
 	}
-	share, suffix, hasSuffix := strings.Cut(afterServer, "/")
-	if share == "" {
+	volEnd := 4 + sep
+	return cleanRootedSuffix(dir[:volEnd], dir[volEnd:])
+}
+
+func cleanSharePath(dir string, start int) string {
+	rest := dir[start:]
+	serverEnd := strings.IndexAny(rest, `/\`)
+	if serverEnd <= 0 {
 		return dir
 	}
-	root := `\\` + server + sep + share
-	if !hasSuffix || suffix == "" {
-		return root
+	afterServer := rest[serverEnd+1:]
+	shareEnd := strings.IndexAny(afterServer, `/\`)
+	if shareEnd <= 0 {
+		return dir
 	}
-	cleaned := path.Clean("/" + suffix)
+
+	rootEnd := start + serverEnd + 1 + shareEnd
+	root, suffix := dir[:rootEnd], dir[rootEnd:]
+	cleaned := path.Clean(strings.ReplaceAll(suffix, `\`, "/"))
 	if cleaned == "/" {
 		return root
 	}
-	if sep == `\` {
+	if suffix[0] == '\\' {
 		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
 	}
 	return root + cleaned
+}
+
+func cleanRootedSuffix(prefix, suffix string) string {
+	cleaned := path.Clean(strings.ReplaceAll(suffix, `\`, "/"))
+	if suffix[0] == '\\' {
+		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	return prefix + cleaned
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.
