@@ -94,7 +94,9 @@ func publicTargetError(message string) string {
 }
 
 func (store *datastore) queueStatus(ctx context.Context) ([]TargetStatus, *time.Time, error) {
-	tx, err := store.db.BeginTx(ctx, nil)
+	// A read-only transaction takes no write lock, so /status answers while
+	// another process writes.
+	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -320,6 +320,9 @@ The processor then saves the Scans to its datastore.
 
 _The processor uses SQLite as its datastore._
 
+If another program, such as the `sqlite3` shell or a backup tool, holds a lock on the database, Autoscan waits up to 5 seconds for it.
+Autoscan stops at startup if it cannot open the database file.
+
 In a separate process, the processor selects Scans from the datastore.
 It always groups the files in the same folder together.
 It waits until all files in that folder are older than the `minimum-age` value.

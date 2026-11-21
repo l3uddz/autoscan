@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -136,13 +135,12 @@ func main() {
 	log.Logger = newLogger(cli.Log, cli.Verbosity)
 
 	// datastore
-	db, err := sql.Open("sqlite", cli.Database)
+	db, err := openDatabase(context.Background(), cli.Database)
 	if err != nil {
 		log.Fatal().
 			Err(err).
 			Msg("Failed opening datastore")
 	}
-	db.SetMaxOpenConns(1)
 
 	// config
 	file, err := waitForConfig(cli.Config, 5*time.Second)
