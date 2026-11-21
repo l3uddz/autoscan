@@ -19,7 +19,7 @@ func scanStats(ctx context.Context, proc *processor.Processor, interval time.Dur
 			return
 		case <-st.C:
 			// retrieve amount of scans remaining
-			sm, err := proc.ScansRemaining()
+			sm, err := proc.ScansRemaining(ctx)
 			if err != nil {
 				if ctx.Err() != nil {
 					return

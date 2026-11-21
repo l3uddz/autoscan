@@ -83,7 +83,7 @@ func TestTargetDeliveryRecoversAfterRestart(t *testing.T) {
 		synctest.Wait()
 		assertDelivered(t, offline, "first", "second")
 		assertDelivered(t, healthy, "first", "second")
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 0 {
 			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
 		}
 		if processed := proc.ScansProcessed(); processed != 2 {
@@ -424,7 +424,7 @@ func TestShutdownStopsScanWithoutRecordingFailure(t *testing.T) {
 		// The worker waits in the scan request until the shutdown ends it.
 		stop()
 		assertTargetStatus(t, proc, "server", 1, "", time.Time{})
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 1 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 1 {
 			t.Fatalf("ScansRemaining = %d, %v, want 1, nil", remaining, err)
 		}
 	})

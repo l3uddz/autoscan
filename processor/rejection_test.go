@@ -47,7 +47,7 @@ func TestRejectedScanIsSetAside(t *testing.T) {
 		synctest.Wait()
 		assertDelivered(t, target, "bad", "bad", "bad", "bad", "bad", "good")
 		assertTargetStatus(t, proc, "server", 0, "", time.Time{})
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 0 {
 			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
 		}
 		if processed := proc.ScansProcessed(); processed != 1 {
@@ -252,7 +252,7 @@ func TestUnavailableErrorsDoNotCountAsRejections(t *testing.T) {
 		time.Sleep(16*time.Minute + 32*time.Minute + 3*time.Hour)
 		synctest.Wait()
 		assertDelivered(t, target, slices.Concat(slices.Repeat([]string{"folder"}, 12), []string{"next"})...)
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 0 {
 			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
 		}
 	})
@@ -280,7 +280,7 @@ func TestNewerEventKeepsSetAsideAllowance(t *testing.T) {
 		time.Sleep(2 * retriesUntilSetAside)
 		synctest.Wait()
 		assertAttempts(t, target, 2*maxScanAttempts)
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 0 {
 			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
 		}
 	})

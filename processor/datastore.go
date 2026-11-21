@@ -129,8 +129,8 @@ func (store *datastore) Upsert(scans []autoscan.Scan) error {
 
 const sqlGetScansRemaining = `SELECT COUNT(folder) FROM scan`
 
-func (store *datastore) GetScansRemaining() (int, error) {
-	row := store.db.QueryRow(sqlGetScansRemaining)
+func (store *datastore) GetScansRemaining(ctx context.Context) (int, error) {
+	row := store.db.QueryRowContext(ctx, sqlGetScansRemaining)
 
 	// COUNT always returns one row.
 	remaining := 0

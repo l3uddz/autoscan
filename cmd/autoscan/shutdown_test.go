@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -156,6 +157,22 @@ func TestScanStatsStopsOnCancel(t *testing.T) {
 			t.Errorf("scanStats waited %v after cancellation, want immediate exit", elapsed)
 		}
 	})
+}
+
+func TestScansRemainingCancelsWhileDBConnectionHeld(t *testing.T) {
+	proc, db := newRouterTestProcessor(t, processor.Config{})
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err = proc.ScansRemaining(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ScansRemaining returned %v, want context.DeadlineExceeded while sole DB connection is held", err)
+	}
 }
 
 func TestNewWatchersCollectsAllErrors(t *testing.T) {

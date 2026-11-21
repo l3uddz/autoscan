@@ -103,8 +103,8 @@ func (p *Processor) wakeWorkers() {
 	p.notifyMu.Unlock()
 }
 
-func (p *Processor) ScansRemaining() (int, error) {
-	return p.store.GetScansRemaining()
+func (p *Processor) ScansRemaining(ctx context.Context) (int, error) {
+	return p.store.GetScansRemaining(ctx)
 }
 
 func (p *Processor) ScansProcessed() int64 {
