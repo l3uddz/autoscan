@@ -2,6 +2,7 @@
 package media
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -51,8 +52,9 @@ func Names(libraries []Library) []string {
 }
 
 // SendUpdated reports a changed path to Emby or Jellyfin with
-// POST /Library/Media/Updated. The request names no library.
-func SendUpdated(c *httpapi.Client, path string, updateType string) error {
+// POST Library/Media/Updated below prefix, the path elements of the API
+// root. The request names no library.
+func SendUpdated(c *httpapi.Client, prefix []string, path string, updateType string) error {
 	type update struct {
 		Path       string `json:"path"`
 		UpdateType string `json:"updateType"`
@@ -64,7 +66,7 @@ func SendUpdated(c *httpapi.Client, path string, updateType string) error {
 		Updates: []update{{Path: path, UpdateType: updateType}},
 	}
 
-	return c.PostJSON(payload, "Library", "Media", "Updated")
+	return c.PostJSON(payload, slices.Concat(prefix, []string{"Library", "Media", "Updated"})...)
 }
 
 // A PathAPI is a media server client whose scan request takes only a path.

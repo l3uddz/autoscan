@@ -19,7 +19,7 @@ func TestScanSendsOneUpdateForFolderInTwoLibraries(t *testing.T) {
 		switch r.URL.Path {
 		case "/emby/Library/SelectableMediaFolders":
 			w.Write([]byte(`[{"Name":"TV","SubFolders":[{"Path":"/mnt/tv"}]},{"Name":"TV 4K","SubFolders":[{"Path":"/mnt/tv"}]}]`))
-		case "/Library/Media/Updated":
+		case "/emby/Library/Media/Updated":
 			var body struct{ Updates []map[string]string }
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Errorf("Decoding update body: %v", err)

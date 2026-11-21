@@ -70,7 +70,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 }
 
 func (c apiClient) Scan(path string) error {
-	if err := media.SendUpdated(c.http, path, "Modified"); err != nil {
+	if err := media.SendUpdated(c.http, nil, path, "Modified"); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 

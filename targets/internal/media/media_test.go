@@ -54,7 +54,7 @@ func TestSendUpdated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SendUpdated(c, "/mnt/tv/Show", "Modified"); err != nil {
+	if err := SendUpdated(c, nil, "/mnt/tv/Show", "Modified"); err != nil {
 		t.Fatal(err)
 	}
 

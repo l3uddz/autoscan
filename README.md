@@ -510,6 +510,7 @@ targets:
 ```
 
 - URL. The URL can point to the Docker container directly, to localhost, or to a reverse proxy in front of Emby.
+  Autoscan sends every request below `/emby` on that URL, so the proxy must forward `/emby`.
 - Token. Autoscan needs an Emby API Token to make requests for you. [This article](https://github.com/MediaBrowser/Emby/wiki/Api-Key-Authentication) tells you how to get a token. \
   _The article is a bit out of date._
 - Rewrite. Emby can run in a Docker container instead of on the host OS. Autoscan can also run in a Docker container. In both cases, you must rewrite the paths. For more information, read the [rewriting section](#rewriting-paths).
