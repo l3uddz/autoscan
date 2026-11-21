@@ -83,7 +83,7 @@ func TestTargetDeliveryRecoversAfterRestart(t *testing.T) {
 		synctest.Wait()
 		assertDelivered(t, offline, "first", "second")
 		assertDelivered(t, healthy, "first", "second")
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 0 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 0 {
 			t.Fatalf("ScansRemaining = %d, %v, want 0, nil", remaining, err)
 		}
 		if processed := proc.ScansProcessed(); processed != 2 {
@@ -131,11 +131,74 @@ func TestScanFailureRetriesOnlyItsTarget(t *testing.T) {
 		if err := proc.Add(scan); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(15 * time.Second)
 		synctest.Wait()
 		assertTargetStatus(t, proc, "flaky", 1, failure.Error(), time.Now().Add(15*time.Second))
 		assertDelivered(t, healthy, "first", "second")
 	})
+}
+
+func TestAddWakesIdleWorkersImmediately(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		first, second := &fakeTarget{}, &fakeTarget{}
+		proc := testProcessorWithConfig(t, Config{
+			Targets: []Target{connectedTarget("first", first), connectedTarget("second", second)},
+		})
+		defer startProcessor(t, proc)()
+
+		start := time.Now()
+		if err := proc.Add(autoscan.Scan{Folder: "arrived", Time: start.Add(-time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+
+		if waited := time.Since(start); waited != 0 {
+			t.Errorf("delivery waited %v, want immediate wakeup", waited)
+		}
+		assertDelivered(t, first, "arrived")
+		assertDelivered(t, second, "arrived")
+	})
+}
+
+func TestNegativeScanDelayUsesZero(t *testing.T) {
+	proc := testProcessorWithConfig(t, Config{ScanDelay: -time.Second})
+	if proc.scanDelay != 0 {
+		t.Errorf("scanDelay = %v, want 0", proc.scanDelay)
+	}
+}
+
+func TestRecordFailureStopsWhenContextCancelsDuringLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autoscan.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	proc := processorWithDB(t, db, Config{Targets: []Target{connectedTarget("plex", &fakeTarget{})}})
+
+	other, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	lock, err := other.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.Exec(`UPDATE scan_target SET last_error = 'locked' WHERE id = 'plex'`); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err = proc.store.recordFailure(ctx, "plex", 15*time.Second, time.Now().Add(15*time.Second), "offline")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("recordFailure returned %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed >= time.Second {
+		t.Errorf("recordFailure waited %v, want cancellation well before the 5s busy_timeout", elapsed)
+	}
 }
 
 func TestMissingAnchorPausesAllTargets(t *testing.T) {
@@ -361,7 +424,7 @@ func TestShutdownStopsScanWithoutRecordingFailure(t *testing.T) {
 		// The worker waits in the scan request until the shutdown ends it.
 		stop()
 		assertTargetStatus(t, proc, "server", 1, "", time.Time{})
-		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 1 {
+		if remaining, err := proc.ScansRemaining(t.Context()); err != nil || remaining != 1 {
 			t.Fatalf("ScansRemaining = %d, %v, want 1, nil", remaining, err)
 		}
 	})

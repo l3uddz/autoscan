@@ -27,6 +27,15 @@ import (
 // retries later. The scan stays in the datastore until then.
 const timeout = 30 * time.Second
 
+const (
+	// maxDrainBytes bounds how much of an unused or error response body is
+	// drained so HTTP keep-alive connections can be reused.
+	maxDrainBytes = 64 << 10
+
+	// maxResponseBytes bounds the JSON response body read by GetJSON.
+	maxResponseBytes = 10 << 20
+)
+
 // Config describes how a Client talks to one media server.
 type Config struct {
 	// BaseURL is the server URL from the target configuration.
@@ -194,14 +203,39 @@ func (c *Client) send(ctx context.Context, method string, query url.Values, in a
 	if err != nil {
 		return err
 	}
-	// The server accepted the request, so a failed close does not fail it.
-	defer res.Body.Close()
-
 	if out == nil {
+		// The server accepted the request, so a failed close does not fail it.
+		closeBody(res.Body)
 		return nil
 	}
-	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+	// decodeJSON drains valid responses to EOF through its size limit.
+	// On decode errors or overflow, close directly without draining further.
+	defer func() { _ = res.Body.Close() }()
+	return decodeJSON(res.Body, out)
+}
+
+func closeBody(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrainBytes))
+	_ = body.Close()
+}
+
+func decodeJSON(r io.Reader, out any) error {
+	limited := &io.LimitedReader{R: r, N: maxResponseBytes + 1}
+	err := json.NewDecoder(limited).Decode(out)
+	if limited.N == 0 {
+		return fmt.Errorf("decoding response: response exceeds %d bytes", maxResponseBytes)
+	}
+	if err != nil {
 		return bodyError("decoding response", err)
+	}
+	// Decode stops after the first JSON value. Drain the rest through the same
+	// limiter so a small value with an oversized tail also fails and trailing
+	// whitespace does not prevent keep-alive reuse.
+	if _, err := io.Copy(io.Discard, limited); err != nil {
+		return bodyError("reading response", err)
+	}
+	if limited.N == 0 {
+		return fmt.Errorf("decoding response: response exceeds %d bytes", maxResponseBytes)
 	}
 	return nil
 }
@@ -261,10 +295,10 @@ func RedactURL(raw string, secretParams ...string) string {
 }
 
 // bodyError wraps an error from reading or decoding a response body.
-// A timeout means that the target is unavailable.
+// A network error or truncated stream means that the target is unavailable.
 func bodyError(msg string, err error) error {
 	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if errors.As(err, &netErr) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return fmt.Errorf("%s: %w: %w", msg, err, autoscan.ErrTargetUnavailable)
 	}
 
@@ -272,20 +306,23 @@ func bodyError(msg string, err error) error {
 }
 
 // responseError returns nil for a 2xx response. For any other status, it
-// closes the response body and returns an error. authMessage describes a 401
-// status. 404 and 5xx gateway errors mean that the target is unavailable.
+// drains and closes the response body and returns an error. authMessage
+// describes a 401 status. 404, 408, 429, and 5xx errors other than 501 mean
+// that the target is unavailable.
 func responseError(res *http.Response, authMessage string) error {
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		return nil
 	}
 
-	res.Body.Close()
+	closeBody(res.Body)
 
-	switch res.StatusCode {
-	case http.StatusUnauthorized:
+	switch {
+	case res.StatusCode == http.StatusUnauthorized:
 		return fmt.Errorf("%s: %s", authMessage, res.Status)
-	case http.StatusNotFound, http.StatusInternalServerError, http.StatusBadGateway,
-		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case res.StatusCode == http.StatusNotFound,
+		res.StatusCode == http.StatusRequestTimeout,
+		res.StatusCode == http.StatusTooManyRequests,
+		res.StatusCode >= 500 && res.StatusCode != http.StatusNotImplemented:
 		return fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
 	default:
 		return errors.New(res.Status)

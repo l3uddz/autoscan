@@ -78,9 +78,14 @@ func (c apiClient) Libraries(ctx context.Context) ([]media.Library, error) {
 	return libraries, nil
 }
 
-// Scan refreshes path in each library of libs.
+// Scan refreshes path in each unique library section of libs.
 func (c apiClient) Scan(ctx context.Context, path string, libs []media.Library) error {
+	seen := make(map[int]bool, len(libs))
 	for _, lib := range libs {
+		if seen[lib.ID] {
+			continue
+		}
+		seen[lib.ID] = true
 		if err := c.refresh(ctx, path, lib.ID); err != nil {
 			return err
 		}

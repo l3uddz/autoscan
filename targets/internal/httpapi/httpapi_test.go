@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -92,6 +95,16 @@ func TestBodyErrorClassifies(t *testing.T) {
 			Unavailable: true,
 		},
 		{
+			Name:        "Connection reset is unavailable",
+			Err:         &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			Unavailable: true,
+		},
+		{
+			Name:        "Unexpected EOF is unavailable",
+			Err:         io.ErrUnexpectedEOF,
+			Unavailable: true,
+		},
+		{
 			Name: "Invalid JSON is not unavailable",
 			Err:  json.Unmarshal([]byte("{"), new(struct{})),
 		},
@@ -119,16 +132,20 @@ func TestResponseErrorClassifies(t *testing.T) {
 		{http.StatusUnauthorized, false},
 		{http.StatusForbidden, false},
 		{http.StatusNotFound, true},
+		{http.StatusRequestTimeout, true},
+		{http.StatusTooManyRequests, true},
 		{http.StatusInternalServerError, true},
 		{http.StatusBadGateway, true},
 		{http.StatusServiceUnavailable, true},
 		{http.StatusGatewayTimeout, true},
 		{http.StatusNotImplemented, false},
+		{522, true},
 	}
 
 	for _, tc := range testCases {
 		t.Run(http.StatusText(tc.Status), func(t *testing.T) {
-			body := &closeRecorder{Reader: strings.NewReader("")}
+			reader := strings.NewReader("error detail")
+			body := &closeRecorder{Reader: reader}
 			res := &http.Response{StatusCode: tc.Status, Status: http.StatusText(tc.Status), Body: body}
 
 			err := responseError(res, "invalid token")
@@ -144,6 +161,9 @@ func TestResponseErrorClassifies(t *testing.T) {
 			}
 			if !body.closed {
 				t.Error("Body is open, want it closed")
+			}
+			if reader.Len() != 0 {
+				t.Errorf("Response body still has %d unread bytes, want it drained", reader.Len())
 			}
 			if tc.Status == http.StatusUnauthorized && !strings.Contains(err.Error(), "invalid token") {
 				t.Errorf("Got error %v, want it to contain the auth message", err)
@@ -475,5 +495,170 @@ func TestRedirectOnSameHostIsFollowed(t *testing.T) {
 	}
 	if gotToken != "token" {
 		t.Errorf("X-Token after the redirect = %q, want token", gotToken)
+	}
+}
+
+func TestSendReusesKeepAliveConnection(t *testing.T) {
+	var mu sync.Mutex
+	var addrs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		addrs = append(addrs, r.RemoteAddr)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ServerName":"Emby","Version":"4.8.0"}`))
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+	c.client.Transport = &http.Transport{}
+	for range 2 {
+		if err := c.Send(t.Context(), http.MethodGet, nil, "System", "Info"); err != nil {
+			t.Fatalf("Send returned %v", err)
+		}
+	}
+	mu.Lock()
+	got := append([]string(nil), addrs...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != got[1] {
+		t.Errorf("Remote addresses = %v, want one reused keep-alive connection", got)
+	}
+}
+
+func TestGetJSONRejectsOversizedResponse(t *testing.T) {
+	t.Run("Accepts response at limit", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`"` + strings.Repeat("a", maxResponseBytes-2) + `"`))
+		}))
+		defer srv.Close()
+
+		c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+		var out string
+		if err := c.GetJSON(t.Context(), &out); err != nil {
+			t.Fatalf("GetJSON returned %v for response at limit", err)
+		}
+		if len(out) != maxResponseBytes-2 {
+			t.Errorf("decoded %d bytes, want %d", len(out), maxResponseBytes-2)
+		}
+	})
+
+	t.Run("Rejects response above limit", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`"`))
+			chunk := strings.Repeat("a", 64<<10)
+			for written := 0; written <= maxResponseBytes; written += len(chunk) {
+				_, _ = w.Write([]byte(chunk))
+			}
+			_, _ = w.Write([]byte(`"`))
+		}))
+		defer srv.Close()
+
+		c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+		var out string
+		err := c.GetJSON(t.Context(), &out)
+		if err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("GetJSON returned %v, want a response size limit error", err)
+		}
+		if errors.Is(err, autoscan.ErrTargetUnavailable) {
+			t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized response: %v", err)
+		}
+	})
+
+	t.Run("Rejects small JSON value with oversized tail", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{}`))
+			chunk := strings.Repeat(" ", 64<<10)
+			for written := 2; written <= maxResponseBytes; written += len(chunk) {
+				_, _ = w.Write([]byte(chunk))
+			}
+		}))
+		defer srv.Close()
+
+		c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+		var out struct{}
+		err := c.GetJSON(t.Context(), &out)
+		if err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("GetJSON returned %v, want a response size limit error", err)
+		}
+		if errors.Is(err, autoscan.ErrTargetUnavailable) {
+			t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized tail: %v", err)
+		}
+	})
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type countingBody struct {
+	r      io.Reader
+	read   int64
+	closed bool
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	b.read += int64(n)
+	return n, err
+}
+
+func (b *countingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+func TestGetJSONStopsReadingAtResponseLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		body func() io.Reader
+	}{
+		{
+			name: "Oversized JSON string",
+			body: func() io.Reader {
+				return io.MultiReader(
+					strings.NewReader(`"`),
+					strings.NewReader(strings.Repeat("a", maxResponseBytes+128<<10)),
+					strings.NewReader(`"`),
+				)
+			},
+		},
+		{
+			name: "Small JSON value with oversized tail",
+			body: func() io.Reader {
+				return io.MultiReader(
+					strings.NewReader(`{}`),
+					strings.NewReader(strings.Repeat(" ", maxResponseBytes+128<<10)),
+				)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &countingBody{r: tc.body()}
+			c := mustNew(t, Config{BaseURL: "http://example.invalid", Log: zerolog.Nop()})
+			c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       body,
+					Request:    r,
+				}, nil
+			})
+
+			var out any
+			err := c.GetJSON(t.Context(), &out)
+			if err == nil || !strings.Contains(err.Error(), "exceeds") {
+				t.Fatalf("GetJSON returned %v, want response size limit error", err)
+			}
+			if !body.closed {
+				t.Error("response body was not closed after overflow")
+			}
+			if body.read > maxResponseBytes+1 {
+				t.Errorf("read %d bytes after overflow, want at most %d", body.read, maxResponseBytes+1)
+			}
+		})
 	}
 }

@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -94,15 +95,15 @@ INSERT INTO scan (folder, priority, time, revision)
 VALUES (?, ?, ?, hex(randomblob(16)))
 ON CONFLICT (folder) DO UPDATE SET
 	priority = MAX(excluded.priority, scan.priority),
-	time = excluded.time,
+	time = MAX(excluded.time, scan.time),
 	revision = excluded.revision
 `
 
-func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
-	if _, err := tx.Exec(sqlUpsert, scan.Folder, scan.Priority, scan.Time.UTC()); err != nil {
+func (store *datastore) upsert(ctx context.Context, tx *sql.Tx, scan autoscan.Scan) error {
+	if _, err := tx.ExecContext(ctx, sqlUpsert, scan.Folder, scan.Priority, scan.Time.UTC()); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`
+	_, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO scan_delivery (target, folder)
 		SELECT id, ? FROM scan_target
 	`, scan.Folder)
@@ -110,7 +111,11 @@ func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
 }
 
 func (store *datastore) Upsert(scans []autoscan.Scan) error {
-	tx, err := store.db.Begin()
+	return store.UpsertContext(context.Background(), scans)
+}
+
+func (store *datastore) UpsertContext(ctx context.Context, scans []autoscan.Scan) error {
+	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -118,7 +123,7 @@ func (store *datastore) Upsert(scans []autoscan.Scan) error {
 	defer tx.Rollback()
 
 	for _, scan := range scans {
-		if err = store.upsert(tx, scan); err != nil {
+		if err = store.upsert(ctx, tx, scan); err != nil {
 			return err
 		}
 	}
@@ -128,8 +133,8 @@ func (store *datastore) Upsert(scans []autoscan.Scan) error {
 
 const sqlGetScansRemaining = `SELECT COUNT(folder) FROM scan`
 
-func (store *datastore) GetScansRemaining() (int, error) {
-	row := store.db.QueryRow(sqlGetScansRemaining)
+func (store *datastore) GetScansRemaining(ctx context.Context) (int, error) {
+	row := store.db.QueryRowContext(ctx, sqlGetScansRemaining)
 
 	// COUNT always returns one row.
 	remaining := 0
@@ -148,8 +153,8 @@ ORDER BY priority DESC, time ASC
 LIMIT 1
 `
 
-func (store *datastore) GetAvailableScan(target string, olderThan time.Time) (queuedScan, error) {
-	row := store.db.QueryRow(sqlGetAvailableScan, target, olderThan.UTC())
+func (store *datastore) GetAvailableScan(ctx context.Context, target string, olderThan time.Time) (queuedScan, error) {
+	row := store.db.QueryRowContext(ctx, sqlGetAvailableScan, target, olderThan.UTC())
 
 	var scan queuedScan
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time, &scan.revision)

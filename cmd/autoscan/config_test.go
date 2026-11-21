@@ -112,17 +112,129 @@ func TestDecodeConfigKeepsDefaultsForUnsetKeys(t *testing.T) {
 		t.Fatalf("decodeConfig returned %v", err)
 	}
 
-	if c.Port != 4040 || c.ScanDelay != time.Second {
-		t.Errorf("port and scan delay = %d, %v, want 4040, 1s", c.Port, c.ScanDelay)
+	if c.Port != 4040 || time.Duration(c.ScanDelay) != time.Second {
+		t.Errorf("port and scan delay = %d, %v, want 4040, 1s", c.Port, time.Duration(c.ScanDelay))
 	}
-	if c.MinimumAge != 10*time.Minute || c.ScanStats != time.Hour || !slices.Equal(c.Host, []string{""}) {
-		t.Errorf("defaults = %v, %v, %q, want 10m, 1h, [\"\"]", c.MinimumAge, c.ScanStats, c.Host)
+	if time.Duration(c.MinimumAge) != 10*time.Minute || time.Duration(c.ScanStats) != time.Hour || !slices.Equal(c.Host, []string{""}) {
+		t.Errorf("defaults = %v, %v, %q, want 10m, 1h, [\"\"]", time.Duration(c.MinimumAge), time.Duration(c.ScanStats), c.Host)
 	}
+}
+
+func TestDecodeConfigAcceptsNumericDurations(t *testing.T) {
+	c, err := decodeConfig(strings.NewReader("minimum-age: 0\nscan-delay: 5000000000\nscan-stats: 0\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig returned %v for numeric durations", err)
+	}
+	if time.Duration(c.MinimumAge) != 0 || time.Duration(c.ScanDelay) != 5*time.Second || time.Duration(c.ScanStats) != 0 {
+		t.Errorf("durations = (%v, %v, %v), want (0s, 5s, 0s)",
+			time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), time.Duration(c.ScanStats))
+	}
+
+	for _, invalid := range []string{"scan-stats: invalid\n", "scan-stats: true\n", "scan-stats: [0]\n"} {
+		if _, err := decodeConfig(strings.NewReader(invalid)); err == nil {
+			t.Errorf("decodeConfig returned nil error for %q", invalid)
+		}
+	}
+}
+
+func TestDecodeConfigZeroesExplicitNulls(t *testing.T) {
+	const input = "minimum-age: null\nscan-delay: ~\nscan-stats:\nport: null\nhost: null\n"
+	c, err := decodeConfig(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("decodeConfig returned %v", err)
+	}
+	if time.Duration(c.MinimumAge) != 0 || time.Duration(c.ScanDelay) != 0 || time.Duration(c.ScanStats) != 0 {
+		t.Errorf("durations = (%v, %v, %v), want all 0",
+			time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), time.Duration(c.ScanStats))
+	}
+	if c.Port != 0 {
+		t.Errorf("port = %d, want 0", c.Port)
+	}
+	if c.Host != nil {
+		t.Errorf("host = %q, want nil", c.Host)
+	}
+}
+
+func TestDecodeConfigResolvesMergedNulls(t *testing.T) {
+	t.Run("Merged nulls zero defaults while omitted keys keep defaults", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<: {port: null, scan-stats: null}\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 0 || time.Duration(c.ScanStats) != 0 {
+			t.Errorf("merged nulls = (port=%d, scan-stats=%v), want (0, 0s)", c.Port, time.Duration(c.ScanStats))
+		}
+		if time.Duration(c.MinimumAge) != 10*time.Minute || time.Duration(c.ScanDelay) != 5*time.Second || !slices.Equal(c.Host, []string{""}) {
+			t.Errorf("omitted defaults = (%v, %v, %q), want (10m, 5s, [\"\"])",
+				time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), c.Host)
+		}
+	})
+
+	t.Run("Merged nulls zero every defaulted field", func(t *testing.T) {
+		const input = "<<: {minimum-age: null, scan-delay: null, scan-stats: null, port: null, host: null}\n"
+		c, err := decodeConfig(strings.NewReader(input))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if time.Duration(c.MinimumAge) != 0 || time.Duration(c.ScanDelay) != 0 || time.Duration(c.ScanStats) != 0 {
+			t.Errorf("durations = (%v, %v, %v), want all 0",
+				time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), time.Duration(c.ScanStats))
+		}
+		if c.Port != 0 || c.Host != nil {
+			t.Errorf("port and host = (%d, %q), want (0, nil)", c.Port, c.Host)
+		}
+	})
+
+	t.Run("Direct value overrides merged null", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<: {port: null}\nport: 4040\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 4040 {
+			t.Errorf("port = %d, want 4040", c.Port)
+		}
+	})
+
+	t.Run("Direct null overrides merged value", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<: {port: 4040}\nport: null\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 0 {
+			t.Errorf("port = %d, want 0", c.Port)
+		}
+	})
+
+	t.Run("Earlier merged null in sequence overrides later merged value", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<:\n  - {port: null}\n  - {port: 4040}\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 0 {
+			t.Errorf("port = %d, want 0", c.Port)
+		}
+	})
+
+	t.Run("Merged alias to null zeroes default", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("scan-delay: &off null\n<<:\n  port: *off\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if time.Duration(c.ScanDelay) != 0 || c.Port != 0 {
+			t.Errorf("values = (scan-delay=%v, port=%d), want (0s, 0)", time.Duration(c.ScanDelay), c.Port)
+		}
+	})
 }
 
 func TestDecodeConfigRejectsUnknownKey(t *testing.T) {
 	if _, err := decodeConfig(strings.NewReader("prot: 4040\n")); err == nil {
 		t.Fatal("decodeConfig returned nil error for an unknown key")
+	}
+}
+
+func TestDecodeConfigRejectsDuplicateKey(t *testing.T) {
+	if _, err := decodeConfig(strings.NewReader("port: 3030\nport: 4040\n")); err == nil {
+		t.Fatal("decodeConfig returned nil error for a duplicate key")
 	}
 }
 
@@ -167,6 +279,11 @@ func TestValidateConfig(t *testing.T) {
 			YAML: "triggers:\n  sonarr:\n    - priority: 1\n",
 		},
 		{
+			Name:    "Empty host list",
+			YAML:    "host: []\n",
+			WantErr: "host must contain at least one address",
+		},
+		{
 			Name:    "Port out of range",
 			YAML:    "port: 70000\n",
 			WantErr: "port",
@@ -190,6 +307,16 @@ func TestValidateConfig(t *testing.T) {
 			Name:    "Trigger name below the manual route",
 			YAML:    "triggers:\n  sonarr:\n    - name: manual/\n",
 			WantErr: `trigger name "manual/" is reserved`,
+		},
+		{
+			Name:    "Trigger name nested under manual",
+			YAML:    "triggers:\n  sonarr:\n    - name: manual/extra\n",
+			WantErr: `trigger name "manual/extra" is reserved`,
+		},
+		{
+			Name:    "Trigger name starting with slash",
+			YAML:    "triggers:\n  sonarr:\n    - name: /sonarr\n",
+			WantErr: `trigger name "/sonarr" must not start with /`,
 		},
 		{
 			Name:    "Trigger name with a route pattern",

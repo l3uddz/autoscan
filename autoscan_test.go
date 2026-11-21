@@ -163,6 +163,19 @@ func TestFilterer(t *testing.T) {
 	}
 }
 
+func TestRewriterCopiesRules(t *testing.T) {
+	rules := []Rewrite{{From: "^/data/", To: "/mnt/"}}
+	rewriter, err := NewRewriter(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rules[0].To = "/other/"
+	if got := rewriter("/data/tv"); got != "/mnt/tv" {
+		t.Errorf("rewriter returned %q after caller mutated rules, want /mnt/tv", got)
+	}
+}
+
 func TestInvalidPatternsReturnErrors(t *testing.T) {
 	const invalid = "(unclosed"
 

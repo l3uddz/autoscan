@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v2"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/targets/plex"
@@ -134,24 +135,73 @@ func waitForConfig(path string, interval time.Duration) (*os.File, error) {
 	}
 }
 
-// decodeConfig decodes the YAML configuration in r over the default values.
-// It returns an error for a key that config does not define.
+// yamlDuration decodes a YAML duration from either a Go duration string such
+// as "5s" or a bare numeric nanosecond value such as 0, keeping compatibility
+// with yaml.v2 configurations.
+type yamlDuration time.Duration
+
+func (d *yamlDuration) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: cannot unmarshal %s into time.Duration", value.Line, value.ShortTag())
+	}
+	if value.ShortTag() == "!!str" {
+		parsed, err := time.ParseDuration(value.Value)
+		if err != nil {
+			return fmt.Errorf("line %d: cannot unmarshal %q into time.Duration: %w", value.Line, value.Value, err)
+		}
+		*d = yamlDuration(parsed)
+		return nil
+	}
+	var ns int64
+	if err := value.Decode(&ns); err != nil {
+		return err
+	}
+	*d = yamlDuration(ns)
+	return nil
+}
+
+// decodeConfig decodes the YAML configuration in r and applies default values
+// only for top-level keys absent from the effective mapping after YAML merge
+// resolution. Explicit YAML nulls (direct or merged via <<) keep the field's
+// zero value, matching yaml.v2 behavior.
 func decodeConfig(r io.Reader) (config, error) {
-	c := config{
-		MinimumAge: 10 * time.Minute,
-		ScanDelay:  5 * time.Second,
-		ScanStats:  1 * time.Hour,
-		Host:       []string{""},
-		Port:       3030,
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return config{}, err
 	}
 
-	decoder := yaml.NewDecoder(r)
-	decoder.SetStrict(true)
+	var c config
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil {
 		return config{}, err
 	}
 
+	var fields map[string]yaml.Node
+	if err := yaml.NewDecoder(bytes.NewReader(raw)).Decode(&fields); err != nil {
+		return config{}, err
+	}
+	applyConfigDefaults(&c, fields)
+
 	return c, nil
+}
+
+func applyConfigDefaults(c *config, fields map[string]yaml.Node) {
+	if _, ok := fields["minimum-age"]; !ok {
+		c.MinimumAge = yamlDuration(10 * time.Minute)
+	}
+	if _, ok := fields["scan-delay"]; !ok {
+		c.ScanDelay = yamlDuration(5 * time.Second)
+	}
+	if _, ok := fields["scan-stats"]; !ok {
+		c.ScanStats = yamlDuration(1 * time.Hour)
+	}
+	if _, ok := fields["host"]; !ok {
+		c.Host = []string{""}
+	}
+	if _, ok := fields["port"]; !ok {
+		c.Port = 3030
+	}
 }
 
 // validateConfig returns an error for each value of c that cannot work, and
@@ -159,6 +209,9 @@ func decodeConfig(r io.Reader) (config, error) {
 // and target packages check their other values when autoscan creates them.
 func validateConfig(c config) (warnings []string, err error) {
 	var errs []error
+	if len(c.Host) == 0 {
+		errs = append(errs, errors.New("host must contain at least one address"))
+	}
 	if c.Port < 0 || c.Port > 65535 {
 		errs = append(errs, fmt.Errorf("port %d is not between 0 and 65535", c.Port))
 	}
@@ -169,9 +222,9 @@ func validateConfig(c config) (warnings []string, err error) {
 		value time.Duration
 		then  string
 	}{
-		{"minimum-age", c.MinimumAge, "autoscan uses 0"},
-		{"scan-delay", c.ScanDelay, "autoscan uses 0"},
-		{"scan-stats", c.ScanStats, "autoscan logs no scan stats"},
+		{"minimum-age", time.Duration(c.MinimumAge), "autoscan uses 0"},
+		{"scan-delay", time.Duration(c.ScanDelay), "autoscan uses 0"},
+		{"scan-stats", time.Duration(c.ScanStats), "autoscan logs no scan stats"},
 	} {
 		if d.value < 0 {
 			warnings = append(warnings, fmt.Sprintf("%s is negative, so %s", d.name, d.then))
@@ -207,7 +260,9 @@ func checkTriggerNames(c config) []error {
 			switch {
 			case seen[t.Name]:
 				errs = append(errs, fmt.Errorf("trigger name %q is used more than once", t.Name))
-			case t.Name == "manual" || t.Name == "manual/":
+			case strings.HasPrefix(t.Name, "/"):
+				errs = append(errs, fmt.Errorf("trigger name %q must not start with /", t.Name))
+			case t.Name == "manual" || strings.HasPrefix(t.Name, "manual/"):
 				errs = append(errs, fmt.Errorf("trigger name %q is reserved for the manual trigger", t.Name))
 			case strings.ContainsAny(t.Name, "{}*"):
 				errs = append(errs, fmt.Errorf("trigger name %q contains a route pattern character: {, }, or *", t.Name))

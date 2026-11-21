@@ -37,30 +37,36 @@ type scanRevision struct {
 // runTarget delivers the scans of target until ctx ends.
 func (p *Processor) runTarget(ctx context.Context, target *targetWorker) {
 	for {
-		delay, err := p.deliver(ctx, target)
+		wake := p.waitChannel()
+		delay, idle, err := p.deliver(ctx, target)
 		if err != nil && ctx.Err() == nil {
 			log.Error().Err(err).Str("target", target.ID).Msg("Scan delivery paused")
 			delay = pollInterval
 		}
+		if !idle {
+			wake = nil
+		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
 		case <-time.After(delay):
 		}
 	}
 }
 
-func (p *Processor) deliver(ctx context.Context, target *targetWorker) (time.Duration, error) {
-	retry, err := p.store.retry(target.ID)
+func (p *Processor) deliver(ctx context.Context, target *targetWorker) (time.Duration, bool, error) {
+	retry, err := p.store.retry(ctx, target.ID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if wait := time.Until(retry.next); wait > 0 {
-		return wait, nil
+		return wait, false, nil
 	}
 	if target.client == nil {
 		if err := target.connect(ctx); err != nil {
-			return p.retryTarget(ctx, target, retry.delay, err)
+			delay, retryErr := p.retryTarget(ctx, target, retry.delay, err)
+			return delay, false, retryErr
 		}
 	}
 	return p.deliverScan(ctx, target, retry.delay)
@@ -78,43 +84,48 @@ func (target *targetWorker) connect(ctx context.Context) error {
 	return nil
 }
 
-func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retryDelay time.Duration) (time.Duration, error) {
-	scan, err := p.store.GetAvailableScan(target.ID, time.Now().Add(-p.minimumAge))
+func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retryDelay time.Duration) (time.Duration, bool, error) {
+	scan, err := p.store.GetAvailableScan(ctx, target.ID, time.Now().Add(-p.minimumAge))
 	if errors.Is(err, errNoScans) {
 		if retryDelay > 0 {
-			return pollInterval, p.store.clearIdleRetry(target.ID)
+			if err := p.store.clearIdleRetry(ctx, target.ID); err != nil {
+				return pollInterval, false, err
+			}
 		}
-		return pollInterval, nil
+		return pollInterval, true, nil
 	}
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if err := p.waitForAnchors(ctx); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	err = target.client.Scan(ctx, scan.Scan)
 	if errors.Is(err, autoscan.ErrNoLibrary) {
-		return p.skipScan(target, scan, err)
+		delay, skipErr := p.skipScan(target, scan, err)
+		return delay, false, skipErr
 	}
 	if err != nil {
 		target.client = nil
 		// A request that the shutdown stopped is no failure of the target.
 		// The scan stays queued for the next start.
 		if ctx.Err() != nil {
-			return 0, ctx.Err()
+			return 0, false, ctx.Err()
 		}
 		if target.rejects(scan, err) {
-			return p.setScanAside(target, scan, err)
+			delay, setAsideErr := p.setScanAside(target, scan, err)
+			return delay, false, setAsideErr
 		}
-		return p.retryTarget(ctx, target, retryDelay, err)
+		delay, retryErr := p.retryTarget(ctx, target, retryDelay, err)
+		return delay, false, retryErr
 	}
 	result, err := p.store.completeDelivery(target.ID, scan)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	target.rejected, target.rejections, target.setAside = scanRevision{}, 0, false
 	p.processed.Add(result.scans)
-	return p.scanDelay, nil
+	return p.scanDelay, false, nil
 }
 
 // skipScan removes the delivery of a scan whose folder is in no library of
@@ -185,7 +196,7 @@ func (p *Processor) retryTarget(ctx context.Context, target *targetWorker, previ
 		return 0, ctx.Err()
 	}
 	delay := min(time.Hour, max(15*time.Second, 2*previous))
-	if err := p.store.recordFailure(target.ID, delay, time.Now().Add(delay), failure.Error()); err != nil {
+	if err := p.store.recordFailure(ctx, target.ID, delay, time.Now().Add(delay), failure.Error()); err != nil {
 		return 0, errors.Join(failure, err)
 	}
 	log.Warn().Err(failure).Str("target", target.ID).Dur("retry_in", delay).Msg("Target delivery failed")

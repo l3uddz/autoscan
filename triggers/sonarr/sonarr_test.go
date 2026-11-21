@@ -100,6 +100,22 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Rename with empty relative path scans series folder",
+			Given{
+				Config:  standardConfig,
+				Fixture: "testdata/rename_empty_relative.json",
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:   "/mnt/unionfs/Media/TV/Westworld",
+						Priority: 5,
+					},
+				},
+			},
+		},
+		{
 			"Scans show folder on SeriesDelete event",
 			Given{
 				Config:  standardConfig,

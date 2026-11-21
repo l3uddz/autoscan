@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/natefinch/lumberjack"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/migrate"
@@ -43,12 +43,12 @@ import (
 
 type config struct {
 	// General configuration
-	Host       []string      `yaml:"host"`
-	Port       int           `yaml:"port"`
-	MinimumAge time.Duration `yaml:"minimum-age"`
-	ScanDelay  time.Duration `yaml:"scan-delay"`
-	ScanStats  time.Duration `yaml:"scan-stats"`
-	Anchors    []string      `yaml:"anchors"`
+	Host       []string     `yaml:"host"`
+	Port       int          `yaml:"port"`
+	MinimumAge yamlDuration `yaml:"minimum-age"`
+	ScanDelay  yamlDuration `yaml:"scan-delay"`
+	ScanStats  yamlDuration `yaml:"scan-stats"`
+	Anchors    []string     `yaml:"anchors"`
 
 	// Authentication for the webhook triggers
 	Auth struct {
@@ -145,6 +145,18 @@ func main() {
 // run starts autoscan with the paths in cli and runs it until a stop
 // signal arrives. It returns an error if autoscan cannot start.
 func run(version string) error {
+	// config and target validation happen before opening the datastore, so a
+	// missing or invalid config does not create or hold open the database file.
+	c, err := loadConfig(cli.Config)
+	if err != nil {
+		return err
+	}
+
+	targets, err := buildTargets(c)
+	if err != nil {
+		return err
+	}
+
 	// datastore
 	db, err := openDatabase(context.Background(), cli.Database)
 	if err != nil {
@@ -156,33 +168,17 @@ func run(version string) error {
 		}
 	}()
 
-	// config
-	c, err := loadConfig(cli.Config)
-	if err != nil {
-		return err
-	}
-
 	// migrator
 	mg, err := migrate.New(db, "migrations")
 	if err != nil {
 		return fmt.Errorf("initialise migrator: %w", err)
 	}
 
-	// targets
-	autoscanTargets, autoscanErr := newTargets("autoscan", c.Targets.Autoscan, ast.New)
-	plexTargets, plexErr := newTargets("plex", c.Targets.Plex, plex.New)
-	embyTargets, embyErr := newTargets("emby", c.Targets.Emby, emby.New)
-	jellyfinTargets, jellyfinErr := newTargets("jellyfin", c.Targets.Jellyfin, jellyfin.New)
-	if err := errors.Join(autoscanErr, plexErr, embyErr, jellyfinErr); err != nil {
-		return fmt.Errorf("check targets: %w", err)
-	}
-	targets := slices.Concat(autoscanTargets, plexTargets, embyTargets, jellyfinTargets)
-
 	// processor
 	proc, err := processor.New(processor.Config{
 		Anchors:    c.Anchors,
-		MinimumAge: c.MinimumAge,
-		ScanDelay:  c.ScanDelay,
+		MinimumAge: time.Duration(c.MinimumAge),
+		ScanDelay:  time.Duration(c.ScanDelay),
 		Targets:    targets,
 		DB:         db,
 		Migrator:   mg,
@@ -192,7 +188,7 @@ func run(version string) error {
 	}
 
 	log.Info().
-		Stringer("min_age", c.MinimumAge).
+		Stringer("min_age", time.Duration(c.MinimumAge)).
 		Strs("anchors", c.Anchors).
 		Msg("Initialised processor")
 
@@ -201,16 +197,8 @@ func run(version string) error {
 		log.Warn().Msg("Webhooks running without authentication")
 	}
 
-	// Catch stop signals only after startup. Before this point, a stop
-	// signal ends autoscan at once, for example while it waits for config.
-	// A web server that fails also stops autoscan, and run returns its error.
-	serving, serverFailed := context.WithCancelCause(context.Background())
-	defer serverFailed(nil)
-	ctx, stop := signal.NotifyContext(serving, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// daemon triggers
-	watchers, err := startWatchers(c.Triggers.Inotify, proc.Add)
+	// Validate and build all triggers before starting any background workers.
+	watchers, err := newWatchers(c.Triggers.Inotify, proc.AddContext)
 	if err != nil {
 		return err
 	}
@@ -221,16 +209,19 @@ func run(version string) error {
 		return fmt.Errorf("initialise trigger: %w", err)
 	}
 
+	// Catch stop signals only after startup. Before this point, a stop
+	// signal ends autoscan at once, for example while it waits for config.
+	// A web server that fails also stops autoscan, and run returns its error.
+	serving, serverFailed := context.WithCancelCause(context.Background())
+	defer serverFailed(nil)
+	ctx, stop := signal.NotifyContext(serving, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	servers, err := startServers(c.Host, c.Port, router, serverFailed)
 	if err != nil {
 		return fmt.Errorf("start web server: %w", err)
 	}
 	logConfigured(c)
-
-	// scan stats
-	if c.ScanStats > 0 {
-		go scanStats(proc, c.ScanStats)
-	}
 
 	// display initialised banner
 	log.Info().
@@ -243,11 +234,7 @@ func run(version string) error {
 		log.Info().Msg("Processor started")
 	}
 
-	processorDone := make(chan struct{})
-	go func() {
-		defer close(processorDone)
-		proc.Run(ctx)
-	}()
+	backgroundDone := startBackground(ctx, proc, watchers, time.Duration(c.ScanStats))
 
 	<-ctx.Done()
 	// The cause of serving is nil after a stop signal.
@@ -256,31 +243,70 @@ func run(version string) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	shutdown(shutdownCtx, servers, processorDone)
+	shutdown(shutdownCtx, servers, backgroundDone)
 	return serverErr
 }
 
-// startWatchers creates an inotify trigger for each config in configs and
-// runs each one in the background.
-func startWatchers(configs []inotify.Config, callback autoscan.ProcessorFunc) ([]*inotify.Trigger, error) {
-	watchers := make([]*inotify.Trigger, 0, len(configs))
-	for _, t := range configs {
-		watcher, err := inotify.New(t, callback)
-		if err != nil {
-			return nil, fmt.Errorf("initialise inotify trigger: %w", err)
-		}
-
-		watchers = append(watchers, watcher)
-		go watcher.Run()
+func buildTargets(c config) ([]processor.Target, error) {
+	autoscanTargets, autoscanErr := newTargets("autoscan", c.Targets.Autoscan, ast.New)
+	plexTargets, plexErr := newTargets("plex", c.Targets.Plex, plex.New)
+	embyTargets, embyErr := newTargets("emby", c.Targets.Emby, emby.New)
+	jellyfinTargets, jellyfinErr := newTargets("jellyfin", c.Targets.Jellyfin, jellyfin.New)
+	if err := errors.Join(autoscanErr, plexErr, embyErr, jellyfinErr); err != nil {
+		return nil, fmt.Errorf("check targets: %w", err)
 	}
+	return slices.Concat(autoscanTargets, plexTargets, embyTargets, jellyfinTargets), nil
+}
 
+// newWatchers creates an inotify trigger for each config in configs without
+// starting them, so startup failures do not leak watcher goroutines.
+func newWatchers(configs []inotify.Config, callback func(context.Context, ...autoscan.Scan) error) ([]*inotify.Trigger, error) {
+	watchers := make([]*inotify.Trigger, 0, len(configs))
+	var errs []error
+	for i, t := range configs {
+		watcher, err := inotify.NewWithContext(t, callback)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("initialise inotify-%d: %w", i+1, err))
+			continue
+		}
+		watchers = append(watchers, watcher)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
 	return watchers, nil
+}
+
+// startBackground starts the inotify triggers, scan stats logger, and
+// processor, and returns a channel that closes when all of them exit.
+func startBackground(ctx context.Context, proc *processor.Processor, watchers []*inotify.Trigger, statsInterval time.Duration) <-chan struct{} {
+	var wg sync.WaitGroup
+	for _, watcher := range watchers {
+		wg.Go(func() {
+			watcher.Run(ctx)
+		})
+	}
+	if statsInterval > 0 {
+		wg.Go(func() {
+			scanStats(ctx, proc, statsInterval)
+		})
+	}
+	wg.Go(func() {
+		proc.Run(ctx)
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		wg.Wait()
+	}()
+	return done
 }
 
 // shutdown stops all servers at the same time, so no server accepts new
 // requests while another waits for its open requests. Then it waits for the
-// processor to stop. It waits at most until ctx ends.
-func shutdown(ctx context.Context, servers []*http.Server, processorDone <-chan struct{}) {
+// background workers to stop. It waits at most until ctx ends.
+func shutdown(ctx context.Context, servers []*http.Server, workersDone <-chan struct{}) {
 	var stopped sync.WaitGroup
 	for _, srv := range servers {
 		stopped.Go(func() {
@@ -295,9 +321,9 @@ func shutdown(ctx context.Context, servers []*http.Server, processorDone <-chan 
 	stopped.Wait()
 
 	select {
-	case <-processorDone:
+	case <-workersDone:
 	case <-ctx.Done():
-		log.Warn().Msg("Processor did not stop in time, unfinished deliveries stay queued")
+		log.Warn().Msg("Workers did not stop in time, unfinished deliveries stay queued")
 	}
 }
 

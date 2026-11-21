@@ -123,3 +123,21 @@ func TestNewRejectsEmptyPath(t *testing.T) {
 		t.Errorf("New returned %v, want %v", err, errEmptyPath)
 	}
 }
+
+func TestNewDoesNotMutatePathRuleSlices(t *testing.T) {
+	pathRewrites := make([]autoscan.Rewrite, 1, 2)
+	pathRewrites[0] = autoscan.Rewrite{From: "^/a/", To: "/b/"}
+	sentinel := pathRewrites[:2]
+	sentinel[1] = autoscan.Rewrite{From: "keep", To: "keep"}
+
+	c := Config{
+		Rewrite: []autoscan.Rewrite{{From: "^/c/", To: "/d/"}},
+		Paths:   []PathConfig{{Path: "/mnt/tv", Rewrite: pathRewrites}},
+	}
+	if _, err := New(c, func(...autoscan.Scan) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if sentinel[1].From != "keep" {
+		t.Errorf("New mutated spare capacity of path Rewrite slice: got %+v", sentinel[1])
+	}
+}

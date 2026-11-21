@@ -58,12 +58,19 @@ func NewLibrary(id int, name string, path string) Library {
 }
 
 // matching returns every library whose path contains folder, or whose
-// path is folder.
+// path is folder. Empty paths and empty folders match nothing.
 func matching(libraries []Library, folder string) []Library {
+	if folder == "" {
+		return nil
+	}
+
 	matches := make([]Library, 0)
 	for _, lib := range libraries {
-		root := lib.Path[:max(0, len(lib.Path)-1)]
-		if strings.HasPrefix(folder, lib.Path) || folder == root {
+		if lib.Path == "" {
+			continue
+		}
+		root := lib.Path[:len(lib.Path)-1]
+		if strings.HasPrefix(folder, lib.Path) || (root != "" && folder == root) {
 			matches = append(matches, lib)
 		}
 	}
@@ -71,10 +78,15 @@ func matching(libraries []Library, folder string) []Library {
 	return matches
 }
 
-// Names returns the library names, for log fields.
+// Names returns the unique library names in order, for log fields.
 func Names(libraries []Library) []string {
+	seen := make(map[string]bool, len(libraries))
 	names := make([]string, 0, len(libraries))
 	for _, lib := range libraries {
+		if seen[lib.Name] {
+			continue
+		}
+		seen[lib.Name] = true
 		names = append(names, lib.Name)
 	}
 

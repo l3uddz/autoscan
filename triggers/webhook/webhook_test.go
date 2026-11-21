@@ -302,21 +302,68 @@ func TestFileEvent(t *testing.T) {
 	}
 }
 
+func TestCleanFolder(t *testing.T) {
+	for dir, want := range map[string]string{
+		"/Movies/Show/":                    "/Movies/Show",
+		"/":                                "/",
+		"tv/Show/":                         "tv/Show",
+		"C:/":                              "C:/",
+		"C:/TV/Show/":                      "C:/TV/Show",
+		`C:\`:                              `C:\`,
+		`C:\TV\Show\`:                      `C:\TV\Show`,
+		`C:\TV\..\Movies`:                  `C:\Movies`,
+		"C:":                               "C:",
+		`C:TV\Show`:                        `C:TV\Show`,
+		`\\server\media\Show\`:             `\\server\media\Show`,
+		`\\server\media\`:                  `\\server\media`,
+		`\\server\media`:                   `\\server\media`,
+		`\\server\media\..\tv\Show\`:       `\\server\media\tv\Show`,
+		`\\server\media\Show\..\Other\`:    `\\server\media\Other`,
+		`\\server\media\Show\..`:           `\\server\media`,
+		`\\server/media/Show/`:             `\\server/media/Show`,
+		`\\server/media/../tv/Show/`:       `\\server/media/tv/Show`,
+		`\\nas/media\Show\`:                `\\nas/media\Show`,
+		`\\nas/media\Show\..\Other\`:       `\\nas/media\Other`,
+		`\\nas/media/Show\`:                `\\nas/media/Show`,
+		`\\?\C:\`:                          `\\?\C:\`,
+		`\\?\C:\TV\Show\`:                  `\\?\C:\TV\Show`,
+		`\\?\C:\TV\..\Movies\`:             `\\?\C:\Movies`,
+		`\\?\C:\TV\..`:                     `\\?\C:\`,
+		`\\.\C:\`:                          `\\.\C:\`,
+		`\\?\UNC\server\share\`:            `\\?\UNC\server\share`,
+		`\\?\UNC\server\share\Show\`:       `\\?\UNC\server\share\Show`,
+		`\\?\UNC\server\share\..\tv\Show\`: `\\?\UNC\server\share\tv\Show`,
+	} {
+		if got := CleanFolder(dir); got != want {
+			t.Errorf("CleanFolder(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
 func TestParentFolder(t *testing.T) {
 	for file, want := range map[string]string{
-		"/TV/Show/Season 1/episode.mkv":   "/TV/Show/Season 1",
-		`/TV/Show/Season 1/a\b.mkv`:       "/TV/Show/Season 1",
-		"/episode.mkv":                    "/",
-		"/music/Artist/./Album/01.flac":   "/music/Artist/Album",
-		"/TV//Show/episode.mkv":           "/TV/Show",
-		`C:\TV\Show\Season 1\episode.mkv`: `C:\TV\Show\Season 1`,
-		"C:/TV/Show/episode.mkv":          "C:/TV/Show",
-		`C:\episode.mkv`:                  `C:\`,
-		"C:/episode.mkv":                  "C:/",
-		`\\server\media\Show\episode.mkv`: `\\server\media\Show`,
-		"episode.mkv":                     "",
-		"C:episode.mkv":                   "",
-		"":                                "",
+		"/TV/Show/Season 1/episode.mkv":         "/TV/Show/Season 1",
+		`/TV/Show/Season 1/a\b.mkv`:             "/TV/Show/Season 1",
+		"/episode.mkv":                          "/",
+		"/music/Artist/./Album/01.flac":         "/music/Artist/Album",
+		"/TV//Show/episode.mkv":                 "/TV/Show",
+		`C:\TV\Show\Season 1\episode.mkv`:       `C:\TV\Show\Season 1`,
+		"C:/TV/Show/episode.mkv":                "C:/TV/Show",
+		`C:\episode.mkv`:                        `C:\`,
+		"C:/episode.mkv":                        "C:/",
+		`\\?\C:\episode.mkv`:                    `\\?\C:\`,
+		`\\?\C:/episode.mkv`:                    `\\?\C:/`,
+		`\\.\C:\episode.mkv`:                    `\\.\C:\`,
+		`\\?\C:\TV\episode.mkv`:                 `\\?\C:\TV`,
+		`\\?\Volume{abc}\episode.mkv`:           `\\?\Volume{abc}\`,
+		`\\?\UNC\server\media\Show\episode.mkv`: `\\?\UNC\server\media\Show`,
+		`\\?\episode.mkv`:                       "",
+		`\\server\media\Show\episode.mkv`:       `\\server\media\Show`,
+		`\\episode.mkv`:                         "",
+		`\\`:                                    "",
+		"episode.mkv":                           "",
+		"C:episode.mkv":                         "",
+		"":                                      "",
 	} {
 		if got := ParentFolder(file); got != want {
 			t.Errorf("ParentFolder(%q) = %q, want %q", file, got, want)
@@ -330,12 +377,20 @@ func TestFileFolder(t *testing.T) {
 	}{
 		{"/TV/Show", "Season 1/episode.mkv", "/TV/Show/Season 1"},
 		{"/TV/Show/", "episode.mkv", "/TV/Show"},
+		{"/TV/Show", "", "/TV/Show"},
+		{"/TV/Show/", "/", "/TV/Show"},
 		{"/TV/Show", `Season 1/a\b.mkv`, "/TV/Show/Season 1"},
 		{`C:\TV\Show`, `Season 1\episode.mkv`, `C:\TV\Show\Season 1`},
+		{`C:\TV\Show`, `\Season 1\episode.mkv`, `C:\TV\Show\Season 1`},
 		{`C:\TV\Show\`, "episode.mkv", `C:\TV\Show`},
+		{`C:\TV\Show\`, "", `C:\TV\Show`},
 		{`C:\`, `Show\episode.mkv`, `C:\Show`},
+		{`\\?\C:\`, "episode.mkv", `\\?\C:\`},
+		{`\\?\C:\`, `Show\episode.mkv`, `\\?\C:\Show`},
+		{`\\.\C:\`, "episode.mkv", `\\.\C:\`},
 		{"C:/TV/Show", "Season 1/episode.mkv", "C:/TV/Show/Season 1"},
 		{`\\server\media\Show`, `Season 1\episode.mkv`, `\\server\media\Show\Season 1`},
+		{`\\?\UNC\server\media\Show`, `Season 1\episode.mkv`, `\\?\UNC\server\media\Show\Season 1`},
 	} {
 		if got := FileFolder(tc.base, tc.relative); got != tc.want {
 			t.Errorf("FileFolder(%q, %q) = %q, want %q", tc.base, tc.relative, got, tc.want)

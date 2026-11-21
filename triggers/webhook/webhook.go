@@ -244,6 +244,87 @@ func absolutePath(p string) bool {
 	return windowsPath(p) && len(p) > 2 && (p[2] == '\\' || p[2] == '/')
 }
 
+// CleanFolder cleans a Unix or Windows folder path while keeping its
+// separator style and preserving Windows drive, UNC, and device volume roots.
+func CleanFolder(dir string) string {
+	if !windowsPath(dir) {
+		return path.Clean(dir)
+	}
+	if strings.HasPrefix(dir, `\\`) {
+		return cleanUNC(dir)
+	}
+	if len(dir) == 2 || (dir[2] != '/' && dir[2] != '\\') {
+		return dir
+	}
+	return cleanRootedSuffix(dir[:2], dir[2:])
+}
+
+// cleanUNC cleans the path suffix below a Windows UNC or device volume root
+// (\\server\share, \\?\C:\, \\.\C:\, or \\?\UNC\server\share) while keeping
+// the original volume prefix verbatim and preventing ".." from escaping it.
+func cleanUNC(dir string) string {
+	if isDevicePrefix(dir) {
+		return cleanDevicePath(dir)
+	}
+	return cleanSharePath(dir, 2)
+}
+
+func isDevicePrefix(p string) bool {
+	return len(p) >= 4 && (p[2] == '?' || p[2] == '.') && (p[3] == '\\' || p[3] == '/')
+}
+
+func isDeviceVolumeRoot(file string, sep int) bool {
+	if !isDevicePrefix(file) || sep <= 4 {
+		return false
+	}
+	first := strings.IndexAny(file[4:], `/\`)
+	return first > 0 && 4+first == sep && !strings.EqualFold(file[4:sep], "UNC")
+}
+
+func cleanDevicePath(dir string) string {
+	if len(dir) >= 8 && strings.EqualFold(dir[4:7], "UNC") && (dir[7] == '\\' || dir[7] == '/') {
+		return cleanSharePath(dir, 8)
+	}
+	sep := strings.IndexAny(dir[4:], `/\`)
+	if sep <= 0 {
+		return dir
+	}
+	volEnd := 4 + sep
+	return cleanRootedSuffix(dir[:volEnd], dir[volEnd:])
+}
+
+func cleanSharePath(dir string, start int) string {
+	rest := dir[start:]
+	serverEnd := strings.IndexAny(rest, `/\`)
+	if serverEnd <= 0 {
+		return dir
+	}
+	afterServer := rest[serverEnd+1:]
+	shareEnd := strings.IndexAny(afterServer, `/\`)
+	if shareEnd <= 0 {
+		return dir
+	}
+
+	rootEnd := start + serverEnd + 1 + shareEnd
+	root, suffix := dir[:rootEnd], dir[rootEnd:]
+	cleaned := path.Clean(strings.ReplaceAll(suffix, `\`, "/"))
+	if cleaned == "/" {
+		return root
+	}
+	if suffix[0] == '\\' {
+		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	return root + cleaned
+}
+
+func cleanRootedSuffix(prefix, suffix string) string {
+	cleaned := path.Clean(strings.ReplaceAll(suffix, `\`, "/"))
+	if suffix[0] == '\\' {
+		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	return prefix + cleaned
+}
+
 // ParentFolder returns the folder of the file at the absolute path file.
 // It cleans a Unix path, as path.Dir does. A root folder, such as "/" or
 // "C:\", keeps its separator. ParentFolder returns "" for a path without a
@@ -260,7 +341,11 @@ func ParentFolder(file string) string {
 	switch {
 	case i < 0:
 		return ""
-	case i == 2 && file[1] == ':':
+	case strings.HasPrefix(file, `\\`) && i <= 1:
+		return ""
+	case isDevicePrefix(file) && i <= 3:
+		return ""
+	case i == 2 && file[1] == ':', isDeviceVolumeRoot(file, i):
 		return file[:i+1]
 	default:
 		return file[:i]
@@ -268,15 +353,23 @@ func ParentFolder(file string) string {
 }
 
 // FileFolder returns the folder of the file at relative, a path below the
-// folder base. A Windows base joins relative with its own separator.
+// folder base. An empty relative path returns the cleaned base folder.
+// A Windows base joins relative with its own separator.
 func FileFolder(base string, relative string) string {
 	if !windowsPath(base) {
+		if strings.TrimLeft(relative, "/") == "" {
+			return CleanFolder(base)
+		}
 		return path.Dir(path.Join(base, relative))
 	}
 
 	separator := "/"
 	if strings.Contains(base, `\`) {
 		separator = `\`
+	}
+	relative = strings.TrimLeft(relative, `/\`)
+	if relative == "" {
+		return CleanFolder(base)
 	}
 	return ParentFolder(strings.TrimRight(base, `/\`) + separator + relative)
 }

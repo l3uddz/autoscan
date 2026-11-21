@@ -52,13 +52,14 @@ func New(c Config) (*Processor, error) {
 		return nil, fmt.Errorf("configure target deliveries: %w", err)
 	}
 
-	// A negative minimum age would deliver a scan before its time.
+	// Negative minimum age or scan delay would mis-schedule deliveries.
 	return &Processor{
 		anchors:    c.Anchors,
 		minimumAge: max(0, c.MinimumAge),
-		scanDelay:  c.ScanDelay,
+		scanDelay:  max(0, c.ScanDelay),
 		targets:    c.Targets,
 		store:      store,
+		notify:     make(chan struct{}),
 	}, nil
 }
 
@@ -71,16 +72,43 @@ type Processor struct {
 	processed  atomic.Int64
 	skipped    atomic.Int64
 
+	notifyMu sync.Mutex
+	notify   chan struct{}
+
 	anchorMu    sync.Mutex
 	anchorProbe *anchorProbe
 }
 
 func (p *Processor) Add(scans ...autoscan.Scan) error {
-	return p.store.Upsert(scans)
+	return p.AddContext(context.Background(), scans...)
 }
 
-func (p *Processor) ScansRemaining() (int, error) {
-	return p.store.GetScansRemaining()
+func (p *Processor) AddContext(ctx context.Context, scans ...autoscan.Scan) error {
+	if err := p.store.UpsertContext(ctx, scans); err != nil {
+		return err
+	}
+	if len(scans) > 0 {
+		p.wakeWorkers()
+	}
+	return nil
+}
+
+func (p *Processor) waitChannel() <-chan struct{} {
+	p.notifyMu.Lock()
+	ch := p.notify
+	p.notifyMu.Unlock()
+	return ch
+}
+
+func (p *Processor) wakeWorkers() {
+	p.notifyMu.Lock()
+	close(p.notify)
+	p.notify = make(chan struct{})
+	p.notifyMu.Unlock()
+}
+
+func (p *Processor) ScansRemaining(ctx context.Context) (int, error) {
+	return p.store.GetScansRemaining(ctx)
 }
 
 func (p *Processor) ScansProcessed() int64 {

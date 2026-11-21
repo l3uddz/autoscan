@@ -65,6 +65,25 @@ func TestMatchingReturnsEveryLibrary(t *testing.T) {
 	}
 }
 
+func TestMatchingIgnoresEmptyPathsAndDeduplicatesNames(t *testing.T) {
+	libraries := []Library{
+		NewLibrary(1, "Empty", ""),
+		NewLibrary(2, "Root", "/"),
+		NewLibrary(3, "TV", "/mnt/tv"),
+		NewLibrary(3, "TV", "/mnt/tv/anime"),
+	}
+
+	if got := Names(matching(libraries, "")); len(got) != 0 {
+		t.Errorf("Matching empty folder = %v, want none", got)
+	}
+	if got := Names(matching([]Library{NewLibrary(1, "Empty", "")}, "/mnt/movies/Film")); len(got) != 0 {
+		t.Errorf("Matching empty library path = %v, want none", got)
+	}
+	if got, want := Names(matching(libraries, "/mnt/tv/anime/Show")), []string{"Root", "TV"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Matching = %v, want %v", got, want)
+	}
+}
+
 func TestSendUpdated(t *testing.T) {
 	var method, path, contentType string
 	var body map[string][]map[string]string
