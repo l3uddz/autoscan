@@ -48,6 +48,11 @@ type Rewrite struct {
 
 type Rewriter func(string) string
 
+type compiledRewrite struct {
+	from *regexp.Regexp
+	to   string
+}
+
 // NewRewriter returns a Rewriter that applies the first rule whose From
 // pattern matches the input. If no rule matches, it returns the input.
 func NewRewriter(rewriteRules []Rewrite) (Rewriter, error) {
@@ -61,10 +66,15 @@ func NewRewriter(rewriteRules []Rewrite) (Rewriter, error) {
 		return nil, err
 	}
 
+	rules := make([]compiledRewrite, len(rewrites))
+	for i, re := range rewrites {
+		rules[i] = compiledRewrite{from: re, to: rewriteRules[i].To}
+	}
+
 	rewriter := func(input string) string {
-		for i, re := range rewrites {
-			if re.MatchString(input) {
-				return re.ReplaceAllString(input, rewriteRules[i].To)
+		for _, rule := range rules {
+			if rule.from.MatchString(input) {
+				return rule.from.ReplaceAllString(input, rule.to)
 			}
 		}
 
