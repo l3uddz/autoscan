@@ -59,6 +59,9 @@ type Trigger struct {
 	log      zerolog.Logger
 	callback autoscan.ProcessorFunc
 	priority int
+
+	watchedMu sync.RWMutex
+	watched   map[string]struct{}
 }
 
 type path struct {
@@ -140,6 +143,12 @@ func (t *Trigger) Run(ctx context.Context) {
 	}
 	t.queue = newQueue(t.callback, t.log, t.priority)
 
+	// Drain watcher errors independently of event handling: fsnotify can
+	// send on the unbuffered Errors channel while holding its internal mutex,
+	// which worker calls like Add and Remove also acquire.
+	var errWG sync.WaitGroup
+	errWG.Go(t.drainErrors)
+
 	var watchWG sync.WaitGroup
 	startWatch := func(p *path) {
 		watchWG.Go(func() {
@@ -151,11 +160,22 @@ func (t *Trigger) Run(ctx context.Context) {
 	}
 
 	t.worker(ctx, startWatch)
-	watchWG.Wait()
+	// Flush pending scans as soon as event intake stops, so a stalled
+	// filesystem walk cannot delay saving scans from healthy roots.
+	t.queue.stop()
 	if err := t.watcher.Close(); err != nil {
 		t.log.Warn().Err(err).Msg("Failed closing filesystem watcher")
 	}
-	t.queue.stop()
+	errWG.Wait()
+	watchWG.Wait()
+}
+
+func (t *Trigger) drainErrors() {
+	for err := range t.watcher.Errors {
+		t.log.Error().
+			Err(err).
+			Msg("Failed receiving filesystem events")
+	}
 }
 
 // watchPath watches the tree at p and tries again until it succeeds or ctx ends.
@@ -268,11 +288,45 @@ func (t *Trigger) watchDir(path string) error {
 	if err := t.watcher.Add(path); err != nil {
 		return fmt.Errorf("watch directory: %w", err)
 	}
+	t.recordWatch(path)
 
 	t.log.Trace().
 		Str("path", path).
 		Msg("Watching directory")
 	return nil
+}
+
+func (t *Trigger) recordWatch(dir string) {
+	clean := filepath.Clean(dir)
+	t.watchedMu.Lock()
+	if t.watched == nil {
+		t.watched = make(map[string]struct{})
+	}
+	t.watched[clean] = struct{}{}
+	t.watchedMu.Unlock()
+}
+
+// takeWatchedBelow removes and returns all watched directories at or below
+// lost. An ordinary file path not in t.watched returns nil in O(1) without
+// scanning the watch list or locking fsnotify unless forceScan is true (for
+// example when an ancestor above a configured root is removed or renamed).
+func (t *Trigger) takeWatchedBelow(lost string, forceScan bool) []string {
+	t.watchedMu.Lock()
+	defer t.watchedMu.Unlock()
+
+	if !forceScan {
+		if _, ok := t.watched[lost]; !ok {
+			return nil
+		}
+	}
+	var removed []string
+	for name := range t.watched {
+		if isWithin(name, lost) {
+			delete(t.watched, name)
+			removed = append(removed, name)
+		}
+	}
+	return removed
 }
 
 // walkError returns what the walk of watchTree does after err at path. It
@@ -342,14 +396,6 @@ func (t *Trigger) worker(ctx context.Context, startWatch func(*path)) {
 			if !ok || !t.handleEvent(ctx, event, startWatch) {
 				return
 			}
-
-		case err, ok := <-t.watcher.Errors:
-			if !ok {
-				return
-			}
-			t.log.Error().
-				Err(err).
-				Msg("Failed receiving filesystem events")
 		}
 	}
 }
@@ -368,7 +414,7 @@ func (t *Trigger) handleEvent(ctx context.Context, event fsnotify.Event, startWa
 	}
 }
 
-// rewatchLostRoot releases watches below a removed or renamed path, and
+// rewatchLostRoot releases watches below a removed or renamed directory, and
 // restarts watching any configured root that was lost.
 func (t *Trigger) rewatchLostRoot(event fsnotify.Event, startWatch func(*path)) {
 	if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
@@ -377,12 +423,13 @@ func (t *Trigger) rewatchLostRoot(event fsnotify.Event, startWatch func(*path)) 
 
 	// After a rename, Linux keeps the subdirectory watches on the moved
 	// inodes under their old paths. Remove them for any renamed or removed
-	// path so moved trees get fresh watches and do not leak.
+	// watched directory so moved trees get fresh watches and do not leak.
 	lost := filepath.Clean(event.Name)
-	for _, name := range t.watcher.WatchList() {
-		if isWithin(name, lost) {
-			_ = t.watcher.Remove(name)
-		}
+	hasLostRoot := slices.ContainsFunc(t.paths, func(p *path) bool {
+		return isWithin(filepath.Clean(p.Path), lost)
+	})
+	for _, name := range t.takeWatchedBelow(lost, hasLostRoot) {
+		_ = t.watcher.Remove(name)
 	}
 
 	for _, p := range t.paths {

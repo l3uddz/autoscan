@@ -395,3 +395,106 @@ func TestTriggerRunStopsOnCancel(t *testing.T) {
 		t.Fatal("Trigger.Run did not exit after context cancellation")
 	}
 }
+
+func TestDrainErrorsDoesNotBlockOnErrorSend(t *testing.T) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := &Trigger{watcher: watcher, log: zerolog.Nop()}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		trigger.drainErrors()
+	}()
+
+	// Sending to the unbuffered Errors channel must not block while
+	// drainErrors is running, and closing the watcher must stop it.
+	select {
+	case watcher.Errors <- errors.New("watch already removed"):
+	case <-time.After(2 * time.Second):
+		t.Fatal("sending to watcher.Errors blocked")
+	}
+
+	if err := watcher.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drainErrors did not exit after watcher.Close")
+	}
+}
+
+func TestTakeWatchedBelowSkipsUntrackedFiles(t *testing.T) {
+	trigger := &Trigger{}
+	trigger.recordWatch("/mnt/tv")
+	trigger.recordWatch("/mnt/tv/Show")
+	trigger.recordWatch("/mnt/tv/Show/Season 1")
+
+	if removed := trigger.takeWatchedBelow("/mnt/tv/Show/Season 1/episode.mkv", false); len(removed) != 0 {
+		t.Errorf("takeWatchedBelow(file) = %v, want nil", removed)
+	}
+
+	removed := trigger.takeWatchedBelow("/mnt/tv/Show", false)
+	slices.Sort(removed)
+	if want := []string{"/mnt/tv/Show", "/mnt/tv/Show/Season 1"}; !slices.Equal(removed, want) {
+		t.Errorf("takeWatchedBelow(dir) = %v, want %v", removed, want)
+	}
+	if _, still := trigger.watched["/mnt/tv"]; !still {
+		t.Error("parent root watch was unexpectedly removed")
+	}
+}
+
+func TestTriggerRunFlushesPendingScansOnCancel(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	mkdirAll(t, show)
+
+	flushed := make(chan autoscan.Scan, 4)
+	trigger, err := New(Config{
+		Priority: 2,
+		Paths:    []PathConfig{{Path: root}},
+	}, func(scans ...autoscan.Scan) error {
+		for _, s := range scans {
+			flushed <- s
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		trigger.Run(ctx)
+	}()
+
+	waitFor(t, 2*time.Second, "root to be watched", func() bool {
+		return trigger.Status().Watching == 1
+	})
+
+	// Write a file so an event enters the 10s debounce queue, then cancel
+	// before queueDelay elapses to verify Run flushes on shutdown.
+	writeFile(t, filepath.Join(show, "episode.mkv"))
+	// Give fsnotify + worker a moment to enqueue the path into the debounce map.
+	time.Sleep(150 * time.Millisecond)
+
+	cancel()
+	select {
+	case scan := <-flushed:
+		if scan.Folder != show || scan.Priority != 2 {
+			t.Errorf("flushed scan = %+v, want folder %q priority 2", scan, show)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending scan was not flushed during shutdown")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Trigger.Run did not exit after cancel")
+	}
+}
