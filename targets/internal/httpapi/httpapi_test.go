@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -92,6 +94,16 @@ func TestBodyErrorClassifies(t *testing.T) {
 			Unavailable: true,
 		},
 		{
+			Name:        "Connection reset is unavailable",
+			Err:         &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			Unavailable: true,
+		},
+		{
+			Name:        "Unexpected EOF is unavailable",
+			Err:         io.ErrUnexpectedEOF,
+			Unavailable: true,
+		},
+		{
 			Name: "Invalid JSON is not unavailable",
 			Err:  json.Unmarshal([]byte("{"), new(struct{})),
 		},
@@ -119,16 +131,20 @@ func TestResponseErrorClassifies(t *testing.T) {
 		{http.StatusUnauthorized, false},
 		{http.StatusForbidden, false},
 		{http.StatusNotFound, true},
+		{http.StatusRequestTimeout, true},
+		{http.StatusTooManyRequests, true},
 		{http.StatusInternalServerError, true},
 		{http.StatusBadGateway, true},
 		{http.StatusServiceUnavailable, true},
 		{http.StatusGatewayTimeout, true},
 		{http.StatusNotImplemented, false},
+		{522, true},
 	}
 
 	for _, tc := range testCases {
 		t.Run(http.StatusText(tc.Status), func(t *testing.T) {
-			body := &closeRecorder{Reader: strings.NewReader("")}
+			reader := strings.NewReader("error detail")
+			body := &closeRecorder{Reader: reader}
 			res := &http.Response{StatusCode: tc.Status, Status: http.StatusText(tc.Status), Body: body}
 
 			err := responseError(res, "invalid token")
@@ -144,6 +160,9 @@ func TestResponseErrorClassifies(t *testing.T) {
 			}
 			if !body.closed {
 				t.Error("Body is open, want it closed")
+			}
+			if reader.Len() != 0 {
+				t.Errorf("Response body still has %d unread bytes, want it drained", reader.Len())
 			}
 			if tc.Status == http.StatusUnauthorized && !strings.Contains(err.Error(), "invalid token") {
 				t.Errorf("Got error %v, want it to contain the auth message", err)
@@ -475,5 +494,48 @@ func TestRedirectOnSameHostIsFollowed(t *testing.T) {
 	}
 	if gotToken != "token" {
 		t.Errorf("X-Token after the redirect = %q, want token", gotToken)
+	}
+}
+
+func TestSendReusesKeepAliveConnection(t *testing.T) {
+	var addrs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		addrs = append(addrs, r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ServerName":"Emby","Version":"4.8.0"}`))
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+	c.client.Transport = &http.Transport{}
+	for range 2 {
+		if err := c.Send(t.Context(), http.MethodGet, nil, "System", "Info"); err != nil {
+			t.Fatalf("Send returned %v", err)
+		}
+	}
+	if len(addrs) != 2 || addrs[0] != addrs[1] {
+		t.Errorf("Remote addresses = %v, want one reused keep-alive connection", addrs)
+	}
+}
+
+func TestGetJSONRejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`"`))
+		chunk := strings.Repeat("a", 64<<10)
+		for written := 0; written <= maxResponseBytes; written += len(chunk) {
+			_, _ = w.Write([]byte(chunk))
+		}
+		_, _ = w.Write([]byte(`"`))
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+	var out string
+	err := c.GetJSON(t.Context(), &out)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("GetJSON returned %v, want a response size limit error", err)
+	}
+	if errors.Is(err, autoscan.ErrTargetUnavailable) {
+		t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized response: %v", err)
 	}
 }
