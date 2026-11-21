@@ -342,21 +342,28 @@ func TestCleanFolder(t *testing.T) {
 
 func TestParentFolder(t *testing.T) {
 	for file, want := range map[string]string{
-		"/TV/Show/Season 1/episode.mkv":   "/TV/Show/Season 1",
-		`/TV/Show/Season 1/a\b.mkv`:       "/TV/Show/Season 1",
-		"/episode.mkv":                    "/",
-		"/music/Artist/./Album/01.flac":   "/music/Artist/Album",
-		"/TV//Show/episode.mkv":           "/TV/Show",
-		`C:\TV\Show\Season 1\episode.mkv`: `C:\TV\Show\Season 1`,
-		"C:/TV/Show/episode.mkv":          "C:/TV/Show",
-		`C:\episode.mkv`:                  `C:\`,
-		"C:/episode.mkv":                  "C:/",
-		`\\server\media\Show\episode.mkv`: `\\server\media\Show`,
-		`\\episode.mkv`:                   "",
-		`\\`:                              "",
-		"episode.mkv":                     "",
-		"C:episode.mkv":                   "",
-		"":                                "",
+		"/TV/Show/Season 1/episode.mkv":         "/TV/Show/Season 1",
+		`/TV/Show/Season 1/a\b.mkv`:             "/TV/Show/Season 1",
+		"/episode.mkv":                          "/",
+		"/music/Artist/./Album/01.flac":         "/music/Artist/Album",
+		"/TV//Show/episode.mkv":                 "/TV/Show",
+		`C:\TV\Show\Season 1\episode.mkv`:       `C:\TV\Show\Season 1`,
+		"C:/TV/Show/episode.mkv":                "C:/TV/Show",
+		`C:\episode.mkv`:                        `C:\`,
+		"C:/episode.mkv":                        "C:/",
+		`\\?\C:\episode.mkv`:                    `\\?\C:\`,
+		`\\?\C:/episode.mkv`:                    `\\?\C:/`,
+		`\\.\C:\episode.mkv`:                    `\\.\C:\`,
+		`\\?\C:\TV\episode.mkv`:                 `\\?\C:\TV`,
+		`\\?\Volume{abc}\episode.mkv`:           `\\?\Volume{abc}\`,
+		`\\?\UNC\server\media\Show\episode.mkv`: `\\?\UNC\server\media\Show`,
+		`\\?\episode.mkv`:                       "",
+		`\\server\media\Show\episode.mkv`:       `\\server\media\Show`,
+		`\\episode.mkv`:                         "",
+		`\\`:                                    "",
+		"episode.mkv":                           "",
+		"C:episode.mkv":                         "",
+		"":                                      "",
 	} {
 		if got := ParentFolder(file); got != want {
 			t.Errorf("ParentFolder(%q) = %q, want %q", file, got, want)
@@ -378,8 +385,12 @@ func TestFileFolder(t *testing.T) {
 		{`C:\TV\Show\`, "episode.mkv", `C:\TV\Show`},
 		{`C:\TV\Show\`, "", `C:\TV\Show`},
 		{`C:\`, `Show\episode.mkv`, `C:\Show`},
+		{`\\?\C:\`, "episode.mkv", `\\?\C:\`},
+		{`\\?\C:\`, `Show\episode.mkv`, `\\?\C:\Show`},
+		{`\\.\C:\`, "episode.mkv", `\\.\C:\`},
 		{"C:/TV/Show", "Season 1/episode.mkv", "C:/TV/Show/Season 1"},
 		{`\\server\media\Show`, `Season 1\episode.mkv`, `\\server\media\Show\Season 1`},
+		{`\\?\UNC\server\media\Show`, `Season 1\episode.mkv`, `\\?\UNC\server\media\Show\Season 1`},
 	} {
 		if got := FileFolder(tc.base, tc.relative); got != tc.want {
 			t.Errorf("FileFolder(%q, %q) = %q, want %q", tc.base, tc.relative, got, tc.want)

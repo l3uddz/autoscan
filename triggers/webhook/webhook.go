@@ -263,10 +263,22 @@ func CleanFolder(dir string) string {
 // (\\server\share, \\?\C:\, \\.\C:\, or \\?\UNC\server\share) while keeping
 // the original volume prefix verbatim and preventing ".." from escaping it.
 func cleanUNC(dir string) string {
-	if len(dir) >= 4 && (dir[2] == '?' || dir[2] == '.') && (dir[3] == '\\' || dir[3] == '/') {
+	if isDevicePrefix(dir) {
 		return cleanDevicePath(dir)
 	}
 	return cleanSharePath(dir, 2)
+}
+
+func isDevicePrefix(p string) bool {
+	return len(p) >= 4 && (p[2] == '?' || p[2] == '.') && (p[3] == '\\' || p[3] == '/')
+}
+
+func isDeviceVolumeRoot(file string, sep int) bool {
+	if !isDevicePrefix(file) || sep <= 4 {
+		return false
+	}
+	first := strings.IndexAny(file[4:], `/\`)
+	return first > 0 && 4+first == sep && !strings.EqualFold(file[4:sep], "UNC")
 }
 
 func cleanDevicePath(dir string) string {
@@ -331,7 +343,9 @@ func ParentFolder(file string) string {
 		return ""
 	case strings.HasPrefix(file, `\\`) && i <= 1:
 		return ""
-	case i == 2 && file[1] == ':':
+	case isDevicePrefix(file) && i <= 3:
+		return ""
+	case i == 2 && file[1] == ':', isDeviceVolumeRoot(file, i):
 		return file[:i+1]
 	default:
 		return file[:i]
