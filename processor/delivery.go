@@ -120,11 +120,16 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 // skipScan removes the delivery of a scan whose folder is in no library of
 // the target. The target answered, so its client stays connected, and the
 // skip does not count as a rejection. A scan that no target needs any more
-// counts as processed, as it does after a delivery.
+// counts as processed, as it does after a delivery. If a newer event for
+// the folder arrived during the delivery, the delivery stays for the new
+// revision, and only the skip of that revision counts.
 func (p *Processor) skipScan(target *targetWorker, scan queuedScan, reason error) (time.Duration, error) {
 	result, err := p.store.dropDelivery(target.ID, scan)
 	if err != nil {
 		return 0, err
+	}
+	if !result.removed {
+		return p.scanDelay, nil
 	}
 	p.processed.Add(result.scans)
 	p.skipped.Add(1)

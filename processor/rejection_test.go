@@ -158,6 +158,32 @@ func TestNegativeMinimumAgeWaitsForScanTime(t *testing.T) {
 	})
 }
 
+func TestSkipOfOldRevisionCountsOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var proc *Processor
+		var attempts atomic.Int32
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			// A new event for the folder arrives during the first attempt.
+			if attempts.Add(1) == 1 {
+				if err := proc.Add(autoscan.Scan{Folder: scan.Folder, Time: time.Now().Add(-time.Minute)}); err != nil {
+					t.Error(err)
+				}
+			}
+			return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary)
+		}}
+		proc = testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "movies")
+		defer startProcessor(t, proc)()
+
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		assertAttempts(t, target, 2)
+		if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 1 || skipped != 1 {
+			t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 1, 1", processed, skipped)
+		}
+	})
+}
+
 func TestSetAsideScanKeepsLastError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		target := &fakeTarget{onScan: func(autoscan.Scan) error { return errors.New("400 Bad Request") }}
