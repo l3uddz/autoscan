@@ -112,11 +112,28 @@ func TestDecodeConfigKeepsDefaultsForUnsetKeys(t *testing.T) {
 		t.Fatalf("decodeConfig returned %v", err)
 	}
 
-	if c.Port != 4040 || c.ScanDelay != time.Second {
-		t.Errorf("port and scan delay = %d, %v, want 4040, 1s", c.Port, c.ScanDelay)
+	if c.Port != 4040 || time.Duration(c.ScanDelay) != time.Second {
+		t.Errorf("port and scan delay = %d, %v, want 4040, 1s", c.Port, time.Duration(c.ScanDelay))
 	}
-	if c.MinimumAge != 10*time.Minute || c.ScanStats != time.Hour || !slices.Equal(c.Host, []string{""}) {
-		t.Errorf("defaults = %v, %v, %q, want 10m, 1h, [\"\"]", c.MinimumAge, c.ScanStats, c.Host)
+	if time.Duration(c.MinimumAge) != 10*time.Minute || time.Duration(c.ScanStats) != time.Hour || !slices.Equal(c.Host, []string{""}) {
+		t.Errorf("defaults = %v, %v, %q, want 10m, 1h, [\"\"]", time.Duration(c.MinimumAge), time.Duration(c.ScanStats), c.Host)
+	}
+}
+
+func TestDecodeConfigAcceptsNumericDurations(t *testing.T) {
+	c, err := decodeConfig(strings.NewReader("minimum-age: 0\nscan-delay: 5000000000\nscan-stats: 0\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig returned %v for numeric durations", err)
+	}
+	if time.Duration(c.MinimumAge) != 0 || time.Duration(c.ScanDelay) != 5*time.Second || time.Duration(c.ScanStats) != 0 {
+		t.Errorf("durations = (%v, %v, %v), want (0s, 5s, 0s)",
+			time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), time.Duration(c.ScanStats))
+	}
+
+	for _, invalid := range []string{"scan-stats: invalid\n", "scan-stats: true\n", "scan-stats: [0]\n"} {
+		if _, err := decodeConfig(strings.NewReader(invalid)); err == nil {
+			t.Errorf("decodeConfig returned nil error for %q", invalid)
+		}
 	}
 }
 

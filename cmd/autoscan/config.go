@@ -134,13 +134,38 @@ func waitForConfig(path string, interval time.Duration) (*os.File, error) {
 	}
 }
 
+// yamlDuration decodes a YAML duration from either a Go duration string such
+// as "5s" or a bare numeric nanosecond value such as 0, keeping compatibility
+// with yaml.v2 configurations.
+type yamlDuration time.Duration
+
+func (d *yamlDuration) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: cannot unmarshal %s into time.Duration", value.Line, value.ShortTag())
+	}
+	if value.ShortTag() == "!!str" {
+		parsed, err := time.ParseDuration(value.Value)
+		if err != nil {
+			return fmt.Errorf("line %d: cannot unmarshal %q into time.Duration: %w", value.Line, value.Value, err)
+		}
+		*d = yamlDuration(parsed)
+		return nil
+	}
+	var ns int64
+	if err := value.Decode(&ns); err != nil {
+		return err
+	}
+	*d = yamlDuration(ns)
+	return nil
+}
+
 // decodeConfig decodes the YAML configuration in r over the default values.
 // It returns an error for a key that config does not define.
 func decodeConfig(r io.Reader) (config, error) {
 	c := config{
-		MinimumAge: 10 * time.Minute,
-		ScanDelay:  5 * time.Second,
-		ScanStats:  1 * time.Hour,
+		MinimumAge: yamlDuration(10 * time.Minute),
+		ScanDelay:  yamlDuration(5 * time.Second),
+		ScanStats:  yamlDuration(1 * time.Hour),
 		Host:       []string{""},
 		Port:       3030,
 	}
@@ -172,9 +197,9 @@ func validateConfig(c config) (warnings []string, err error) {
 		value time.Duration
 		then  string
 	}{
-		{"minimum-age", c.MinimumAge, "autoscan uses 0"},
-		{"scan-delay", c.ScanDelay, "autoscan uses 0"},
-		{"scan-stats", c.ScanStats, "autoscan logs no scan stats"},
+		{"minimum-age", time.Duration(c.MinimumAge), "autoscan uses 0"},
+		{"scan-delay", time.Duration(c.ScanDelay), "autoscan uses 0"},
+		{"scan-stats", time.Duration(c.ScanStats), "autoscan logs no scan stats"},
 	} {
 		if d.value < 0 {
 			warnings = append(warnings, fmt.Sprintf("%s is negative, so %s", d.name, d.then))

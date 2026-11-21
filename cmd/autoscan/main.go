@@ -43,12 +43,12 @@ import (
 
 type config struct {
 	// General configuration
-	Host       []string      `yaml:"host"`
-	Port       int           `yaml:"port"`
-	MinimumAge time.Duration `yaml:"minimum-age"`
-	ScanDelay  time.Duration `yaml:"scan-delay"`
-	ScanStats  time.Duration `yaml:"scan-stats"`
-	Anchors    []string      `yaml:"anchors"`
+	Host       []string     `yaml:"host"`
+	Port       int          `yaml:"port"`
+	MinimumAge yamlDuration `yaml:"minimum-age"`
+	ScanDelay  yamlDuration `yaml:"scan-delay"`
+	ScanStats  yamlDuration `yaml:"scan-stats"`
+	Anchors    []string     `yaml:"anchors"`
 
 	// Authentication for the webhook triggers
 	Auth struct {
@@ -177,8 +177,8 @@ func run(version string) error {
 	// processor
 	proc, err := processor.New(processor.Config{
 		Anchors:    c.Anchors,
-		MinimumAge: c.MinimumAge,
-		ScanDelay:  c.ScanDelay,
+		MinimumAge: time.Duration(c.MinimumAge),
+		ScanDelay:  time.Duration(c.ScanDelay),
 		Targets:    targets,
 		DB:         db,
 		Migrator:   mg,
@@ -188,7 +188,7 @@ func run(version string) error {
 	}
 
 	log.Info().
-		Stringer("min_age", c.MinimumAge).
+		Stringer("min_age", time.Duration(c.MinimumAge)).
 		Strs("anchors", c.Anchors).
 		Msg("Initialised processor")
 
@@ -234,7 +234,7 @@ func run(version string) error {
 		log.Info().Msg("Processor started")
 	}
 
-	backgroundDone := startBackground(ctx, proc, watchers, c.ScanStats)
+	backgroundDone := startBackground(ctx, proc, watchers, time.Duration(c.ScanStats))
 
 	<-ctx.Done()
 	// The cause of serving is nil after a stop signal.
