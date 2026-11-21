@@ -30,6 +30,12 @@ type Target interface {
 // ErrTargetUnavailable indicates that a target cannot accept scans.
 var ErrTargetUnavailable = errors.New("target unavailable")
 
+// ErrNoLibrary means that the scan folder is in no library of the target.
+// With several targets, this is normal for a folder that only some of them
+// hold. The processor removes the delivery without counting a processed
+// scan.
+var ErrNoLibrary = errors.New("folder is in no library of the target")
+
 type Rewrite struct {
 	From string `yaml:"from"`
 	To   string `yaml:"to"`

@@ -2,6 +2,7 @@
 package media
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -103,7 +104,7 @@ func (t *PathTarget) Available() error {
 }
 
 // Scan sends the rewritten scan folder to the media server. If the folder
-// is in no library, Scan logs a warning and sends nothing.
+// is in no library, Scan sends nothing and returns autoscan.ErrNoLibrary.
 func (t *PathTarget) Scan(scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
@@ -112,11 +113,7 @@ func (t *PathTarget) Scan(scan autoscan.Scan) error {
 		return err
 	}
 	if len(libs) == 0 {
-		t.log.Warn().
-			Str("path", scanFolder).
-			Msg("No target libraries found")
-
-		return nil
+		return fmt.Errorf("%s: %w", scanFolder, autoscan.ErrNoLibrary)
 	}
 
 	l := t.log.With().

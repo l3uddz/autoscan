@@ -398,6 +398,7 @@ _Do not forget the `s`, `m`, or `h` suffix. Without a suffix, the time unit is n
 At the interval that `scan-stats` sets, Autoscan prints this information:
 
 - Scans processed
+- Scans skipped, because the folder is in no library of a target
 - Scans remaining
 
 ### Processor status
@@ -451,7 +452,8 @@ Plex, Emby, and Jellyfin targets read the library list of the server when they c
 If a scan folder is in no library, the target reads the list again, so it finds a library that you added later.
 The target reads the list at most once a minute.
 A folder that is still in no library after a new read does not cause another read for one hour.
-The target then sends no scan for that folder and logs a warning.
+The target then sends no scan for that folder.
+Autoscan logs a warning, removes the delivery for that target, and counts it as skipped, not as processed.
 
 The URL of a target must start with `http://` or `https://` and contain a host.
 It can contain a path, such as `https://domain.tld/plex` for a reverse proxy, and `user:password@` for Basic authentication.

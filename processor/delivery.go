@@ -96,7 +96,11 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 	if err := p.waitForAnchors(ctx); err != nil {
 		return 0, err
 	}
-	if err := target.client.Scan(scan.Scan); err != nil {
+	err = target.client.Scan(scan.Scan)
+	if errors.Is(err, autoscan.ErrNoLibrary) {
+		return p.skipScan(target, scan, err)
+	}
+	if err != nil {
 		target.client = nil
 		if target.rejects(scan, err) {
 			return p.setScanAside(target, scan, err)
@@ -109,6 +113,18 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 	}
 	target.rejected, target.rejections, target.setAside = scanRevision{}, 0, false
 	p.processed.Add(result.scans)
+	return p.scanDelay, nil
+}
+
+// skipScan removes the delivery of a scan whose folder is in no library of
+// the target. The target answered, so its client stays connected, and the
+// skip does not count as a processed scan or as a rejection.
+func (p *Processor) skipScan(target *targetWorker, scan queuedScan, reason error) (time.Duration, error) {
+	if _, err := p.store.completeDelivery(target.ID, scan); err != nil {
+		return 0, err
+	}
+	p.skipped.Add(1)
+	log.Warn().Err(reason).Str("target", target.ID).Msg("Scan skipped, folder is in no target library")
 	return p.scanDelay, nil
 }
 

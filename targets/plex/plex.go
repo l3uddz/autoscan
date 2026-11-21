@@ -80,11 +80,7 @@ func (t *target) Scan(scan autoscan.Scan) error {
 		return err
 	}
 	if len(libs) == 0 {
-		t.log.Warn().
-			Str("path", scanFolder).
-			Msg("No target libraries found")
-
-		return nil
+		return fmt.Errorf("%s: %w", scanFolder, autoscan.ErrNoLibrary)
 	}
 
 	// send scan request

@@ -112,16 +112,17 @@ func TestPathTargetScan(t *testing.T) {
 	libraries := []Library{NewLibrary(0, "TV", "/mnt/tv"), NewLibrary(0, "TV 4K", "/mnt/tv")}
 
 	type Test struct {
-		Name   string
-		Folder string
-		APIErr error
-		Want   []string
+		Name    string
+		Folder  string
+		APIErr  error
+		WantErr error
+		Want    []string
 	}
 
 	var testCases = []Test{
-		{"Sends one request for a folder in two libraries", "/data/tv/Show", nil, []string{"/mnt/tv/Show"}},
-		{"Sends nothing for a folder in no library", "/data/movies/Film", nil, nil},
-		{"Returns the API error", "/data/tv/Show", autoscan.ErrTargetUnavailable, []string{"/mnt/tv/Show"}},
+		{"Sends one request for a folder in two libraries", "/data/tv/Show", nil, nil, []string{"/mnt/tv/Show"}},
+		{"Sends nothing for a folder in no library", "/data/movies/Film", nil, autoscan.ErrNoLibrary, nil},
+		{"Returns the API error", "/data/tv/Show", autoscan.ErrTargetUnavailable, autoscan.ErrTargetUnavailable, []string{"/mnt/tv/Show"}},
 	}
 
 	for _, tc := range testCases {
@@ -134,8 +135,8 @@ func TestPathTargetScan(t *testing.T) {
 			target := NewPathTarget(zerolog.Nop(), rewrite, list, api)
 
 			err = target.Scan(autoscan.Scan{Folder: tc.Folder})
-			if !errors.Is(err, tc.APIErr) {
-				t.Errorf("Scan returned %v, want %v", err, tc.APIErr)
+			if !errors.Is(err, tc.WantErr) || (err == nil) != (tc.WantErr == nil) {
+				t.Errorf("Scan returned %v, want %v", err, tc.WantErr)
 			}
 			if !reflect.DeepEqual(api.paths, tc.Want) {
 				t.Errorf("API got paths %v, want %v", api.paths, tc.Want)

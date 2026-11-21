@@ -55,6 +55,35 @@ func TestRejectedScanIsSetAside(t *testing.T) {
 	})
 }
 
+func TestFolderInNoLibraryIsSkipped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var opens atomic.Int32
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			if scan.Folder == "movies" {
+				return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary)
+			}
+			return nil
+		}}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{{ID: "server", Open: func() (autoscan.Target, error) {
+			opens.Add(1)
+			return target, nil
+		}}}})
+		addScans(t, proc, "movies", "tv")
+		defer startProcessor(t, proc)()
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		assertDelivered(t, target, "movies", "tv")
+		assertTargetStatus(t, proc, "server", 0, "", time.Time{})
+		if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 1 || skipped != 1 {
+			t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 1, 1", processed, skipped)
+		}
+		if n := opens.Load(); n != 1 {
+			t.Errorf("Open calls = %d, want 1: a skipped folder reset the client", n)
+		}
+	})
+}
+
 func TestSetAsideScanKeepsLastError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		target := &fakeTarget{onScan: func(autoscan.Scan) error { return errors.New("400 Bad Request") }}

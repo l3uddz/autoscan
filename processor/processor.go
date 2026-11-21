@@ -66,6 +66,7 @@ type Processor struct {
 	targets    []Target
 	store      *datastore
 	processed  atomic.Int64
+	skipped    atomic.Int64
 
 	anchorMu    sync.Mutex
 	anchorProbe *anchorProbe
@@ -81,6 +82,12 @@ func (p *Processor) ScansRemaining() (int, error) {
 
 func (p *Processor) ScansProcessed() int64 {
 	return p.processed.Load()
+}
+
+// ScansSkipped returns how many deliveries the processor removed because
+// the scan folder was in no library of the target.
+func (p *Processor) ScansSkipped() int64 {
+	return p.skipped.Load()
 }
 
 // Run starts one worker for each target and waits for them to exit.
