@@ -121,7 +121,7 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 // the target. The target answered, so its client stays connected, and the
 // skip does not count as a processed scan or as a rejection.
 func (p *Processor) skipScan(target *targetWorker, scan queuedScan, reason error) (time.Duration, error) {
-	if _, err := p.store.completeDelivery(target.ID, scan); err != nil {
+	if _, err := p.store.dropDelivery(target.ID, scan); err != nil {
 		return 0, err
 	}
 	p.skipped.Add(1)
@@ -152,7 +152,7 @@ func (target *targetWorker) rejects(scan queuedScan, err error) bool {
 // the folder arrived during the delivery, the delivery stays for the new
 // revision, and the worker can still set aside a scan.
 func (p *Processor) setScanAside(target *targetWorker, scan queuedScan, failure error) (time.Duration, error) {
-	result, err := p.store.setAsideDelivery(target.ID, scan)
+	result, err := p.store.dropDelivery(target.ID, scan)
 	if err != nil {
 		return 0, errors.Join(failure, err)
 	}

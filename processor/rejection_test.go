@@ -85,6 +85,27 @@ func TestFolderInNoLibraryIsSkipped(t *testing.T) {
 	})
 }
 
+func TestSkippedScanKeepsLastError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			if scan.Folder == "movies" {
+				return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary)
+			}
+			return errors.New("400 Bad Request")
+		}}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "bad", "movies")
+		defer startProcessor(t, proc)()
+
+		// The skip reaches no server, so /status keeps the error of the
+		// scan that was set aside.
+		time.Sleep(retriesUntilSetAside + time.Second)
+		synctest.Wait()
+		assertDelivered(t, target, "bad", "bad", "bad", "bad", "bad", "movies")
+		assertTargetStatus(t, proc, "server", 0, "400 Bad Request", time.Time{})
+	})
+}
+
 func TestSetAsideScanKeepsLastError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		target := &fakeTarget{onScan: func(autoscan.Scan) error { return errors.New("400 Bad Request") }}

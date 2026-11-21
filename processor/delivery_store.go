@@ -95,8 +95,12 @@ const sqlResetRetry = `UPDATE scan_target SET retry_delay = 0, next_retry = 0 WH
 // sqlClearRetry ends the retry delay and clears the last error of a target.
 const sqlClearRetry = `UPDATE scan_target SET retry_delay = 0, next_retry = 0, last_error = '' WHERE id = ?`
 
+// clearIdleRetry ends the retry delay of a target that has no deliveries.
+// It keeps the last error.
 func (store *datastore) clearIdleRetry(target string) error {
-	_, err := store.db.Exec(sqlResetRetry+`
+	_, err := store.db.Exec(`
+		UPDATE scan_target SET retry_delay = 0, next_retry = 0
+		WHERE id = ? AND retry_delay > 0
 		AND NOT EXISTS (SELECT 1 FROM scan_delivery WHERE target = scan_target.id)
 	`, target)
 	return err
@@ -118,9 +122,10 @@ func (store *datastore) completeDelivery(target string, scan queuedScan) (delive
 	return store.removeDelivery(target, scan, sqlClearRetry)
 }
 
-// setAsideDelivery removes the delivery of scan to target after the target
-// kept rejecting it. It ends the retry delay and keeps the last error.
-func (store *datastore) setAsideDelivery(target string, scan queuedScan) (deliveryResult, error) {
+// dropDelivery removes the delivery of scan to target when the target did
+// not receive it: the target kept rejecting it, or the folder is in no
+// library of the target. It ends the retry delay and keeps the last error.
+func (store *datastore) dropDelivery(target string, scan queuedScan) (deliveryResult, error) {
 	return store.removeDelivery(target, scan, sqlResetRetry)
 }
 

@@ -461,6 +461,7 @@ The target reads the list at most once a minute.
 A folder that is still in no library after a new read does not cause another read for one hour.
 The target then sends no scan for that folder.
 Autoscan logs a warning, removes the delivery for that target, and counts it as skipped, not as processed.
+The skip keeps the last error of the target, which `/status` shows.
 
 The URL of a target must start with `http://` or `https://` and contain a host.
 It can contain a path, such as `https://domain.tld/plex` for a reverse proxy, and `user:password@` for Basic authentication.
