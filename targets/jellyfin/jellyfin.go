@@ -1,3 +1,5 @@
+// Package jellyfin is the target that starts a library scan of a folder on
+// a Jellyfin server.
 package jellyfin
 
 import (

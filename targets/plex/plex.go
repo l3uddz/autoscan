@@ -1,3 +1,5 @@
+// Package plex is the target that starts a library scan of a folder on a
+// Plex server.
 package plex
 
 import (
