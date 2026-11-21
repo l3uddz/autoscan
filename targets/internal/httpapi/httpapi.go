@@ -72,17 +72,19 @@ func New(c Config) (*Client, error) {
 // maxRedirects is how many redirects a request follows, as in Go's default.
 const maxRedirects = 10
 
-// errRedirect means that the target redirected a request to another host,
-// or that the redirect changed the method, such as a POST to a GET. The
-// token headers must not reach another host, and a scan sent as a GET is
-// lost. The error marks the target unavailable, so the scans stay queued.
-var errRedirect = errors.New("target redirected the request to another host or method, set the target url to the address that answers")
+// errRedirect means that the target redirected a request to another host
+// or port, from https to http, or to another method, such as from a POST
+// to a GET. The token headers must not reach another address or travel
+// without encryption, and a scan sent as a GET is lost. The error marks the
+// target unavailable, so the scans stay queued.
+var errRedirect = errors.New("target redirected the request to another host, port, scheme, or method, set the target url to the address that answers")
 
-// checkRedirect follows a redirect only to the same host name with the same
-// method, such as from http to https.
+// checkRedirect follows a redirect only to the same host and port with the
+// same method. It allows a change from http to https, but not back.
 func checkRedirect(req *http.Request, via []*http.Request) error {
 	first := via[0]
-	if req.URL.Hostname() != first.URL.Hostname() || req.Method != first.Method {
+	downgrade := first.URL.Scheme == "https" && req.URL.Scheme != "https"
+	if req.URL.Host != first.URL.Host || downgrade || req.Method != first.Method {
 		return errRedirect
 	}
 	if len(via) >= maxRedirects {

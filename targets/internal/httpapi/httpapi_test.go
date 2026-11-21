@@ -388,16 +388,42 @@ func TestRedirectToOtherMethodIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestRedirectToOtherHostIsUnavailable(t *testing.T) {
+func TestCheckRedirect(t *testing.T) {
+	var testCases = []struct {
+		Name    string
+		From    string
+		To      string
+		Method  string
+		WantErr bool
+	}{
+		{"Same host and port", "http://plex.invalid:32400/old", "http://plex.invalid:32400/new", http.MethodGet, false},
+		{"Upgrade to https", "http://plex.invalid/old", "https://plex.invalid/new", http.MethodGet, false},
+		{"Other host", "http://plex.invalid/", "http://other.invalid/", http.MethodGet, true},
+		{"Other port", "http://plex.invalid:32400/", "http://plex.invalid:8080/", http.MethodGet, true},
+		{"Downgrade to http", "https://plex.invalid/", "http://plex.invalid/", http.MethodGet, true},
+		{"Other method", "http://plex.invalid/old", "http://plex.invalid/new", http.MethodPost, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			first := httptest.NewRequest(http.MethodGet, tc.From, nil)
+			next := httptest.NewRequest(tc.Method, tc.To, nil)
+			if err := checkRedirect(next, []*http.Request{first}); (err != nil) != tc.WantErr {
+				t.Errorf("checkRedirect = %v, want error %v", err, tc.WantErr)
+			}
+		})
+	}
+}
+
+func TestRedirectToOtherPortIsUnavailable(t *testing.T) {
 	var leaked string
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		leaked = r.Header.Get("X-Token")
 	}))
 	defer other.Close()
-	// The other server listens on localhost, this one on 127.0.0.1.
-	otherURL := strings.Replace(other.URL, "127.0.0.1", "localhost", 1)
+	// Both servers listen on 127.0.0.1, on different ports.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, otherURL, http.StatusFound)
+		http.Redirect(w, r, other.URL, http.StatusFound)
 	}))
 	defer srv.Close()
 

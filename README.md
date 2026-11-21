@@ -469,7 +469,8 @@ It must not contain a query or a fragment, so put the token in the `token` field
 Autoscan checks the URL, the token, and the rewrite rules of each target at startup.
 If a value cannot work, Autoscan stops with an error that names the target, such as `plex-2`.
 A token cannot contain a quote or a control character.
-Autoscan follows a redirect only to the same host name with the same method, for example from `http://` to `https://`.
+Autoscan follows a redirect only to the same host and port with the same method.
+It also follows a redirect from `http://` to `https://` on the same host, but not from `https://` to `http://`.
 Any other redirect counts as an unavailable target, and the scans stay queued. In that case, set the URL to the address that answers.
 
 Autoscan identifies a target by its type and full configured URL.
