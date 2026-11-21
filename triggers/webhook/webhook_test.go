@@ -18,8 +18,6 @@ import (
 )
 
 func TestHandler(t *testing.T) {
-	currentTime := time.Now()
-	now := func() time.Time { return currentTime }
 	rewrites := []autoscan.Rewrite{
 		{From: "^/data/drop$", To: ""},
 		{From: "^/data/", To: "/mnt/"},
@@ -85,23 +83,35 @@ func TestHandler(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			parse := func(*http.Request) (Event, error) { return tc.Event, tc.ParseErr }
 			var got []string
+			var times []time.Time
 			callback := func(scans ...autoscan.Scan) error {
 				for _, scan := range scans {
-					if scan.Priority != 3 || !scan.Time.Equal(currentTime) {
-						t.Errorf("Got scan %+v, want priority 3 and the test time", scan)
+					if scan.Priority != 3 {
+						t.Errorf("Got scan %+v, want priority 3", scan)
 					}
 					got = append(got, scan.Folder)
+					times = append(times, scan.Time)
 				}
 				return tc.CallbackErr
 			}
 
-			handler, err := New(Config{Priority: 3, Rewrite: rewrites}, parse, now, callback)
+			handler, err := New(Config{Priority: 3, Rewrite: rewrites}, parse, callback)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			rec := httptest.NewRecorder()
+			before := time.Now()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+			after := time.Now()
+
+			// Each scan of the request has the same time, from the request.
+			for _, scanTime := range times {
+				if !scanTime.Equal(times[0]) || scanTime.Before(before) || scanTime.After(after) {
+					t.Errorf("Scan times = %v, want one time between %v and %v", times, before, after)
+					break
+				}
+			}
 
 			if rec.Code != tc.WantStatus {
 				t.Errorf("Status = %d, want %d", rec.Code, tc.WantStatus)
@@ -152,7 +162,7 @@ func TestHandlerVerbosity(t *testing.T) {
 				return Event{Type: "Test"}, nil
 			}
 
-			handler, err := New(Config{Verbosity: tc.Verbosity}, parse, time.Now, nil)
+			handler, err := New(Config{Verbosity: tc.Verbosity}, parse, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -248,7 +258,7 @@ func TestHandlerRejectsOversizedBody(t *testing.T) {
 		return nil
 	}
 
-	handler, err := New(Config{}, parse, time.Now, callback)
+	handler, err := New(Config{}, parse, callback)
 	if err != nil {
 		t.Fatal(err)
 	}

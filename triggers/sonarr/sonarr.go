@@ -3,7 +3,6 @@ package sonarr
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/triggers/webhook"
@@ -14,7 +13,7 @@ type Config = webhook.Config
 // New returns the HTTP handler for Sonarr webhooks. It sends the scans to
 // callback.
 func New(c Config, callback autoscan.ProcessorFunc) (http.Handler, error) {
-	return webhook.New(c, parse, now, callback)
+	return webhook.New(c, parse, callback)
 }
 
 type sonarrEvent struct {
@@ -79,5 +78,3 @@ func parse(r *http.Request) (webhook.Event, error) {
 	// Other events, such as Test or Grab, have no folders to scan.
 	return event, nil
 }
-
-var now = time.Now

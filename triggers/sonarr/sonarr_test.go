@@ -38,11 +38,6 @@ func TestHandler(t *testing.T) {
 		}},
 	}
 
-	currentTime := time.Now()
-	now = func() time.Time {
-		return currentTime
-	}
-
 	var testCases = []Test{
 		{
 			"Scan has all the correct fields on Download event",
@@ -56,7 +51,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 1",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -73,7 +67,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 2",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -90,22 +83,18 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 1",
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 1",
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 2",
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 2",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -122,7 +111,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -139,7 +127,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   `C:\TV\Westworld\Season 1`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -156,22 +143,18 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   `C:\TV\Westworld\Season 1`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   `C:\TV\Westworld\Specials`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   `C:\TV\Westworld\Season 0`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   `C:\TV\Westworld\Season 2`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -201,6 +184,10 @@ func TestHandler(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			callback := func(scans ...autoscan.Scan) error {
+				// The webhook package tests the scan time.
+				for i := range scans {
+					scans[i].Time = time.Time{}
+				}
 				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
 					t.Log(scans)
 					t.Log(tc.Expected.Scans)

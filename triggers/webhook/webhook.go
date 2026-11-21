@@ -51,9 +51,9 @@ type Event struct {
 type Parser func(r *http.Request) (Event, error)
 
 // New returns the webhook handler for parse. It uses the priority, the
-// rewrite rules, and the verbosity of c. now returns the scan time. The
-// handler sends the scans to callback.
-func New(c Config, parse Parser, now func() time.Time, callback autoscan.ProcessorFunc) (http.Handler, error) {
+// rewrite rules, and the verbosity of c. The handler sends the scans to
+// callback.
+func New(c Config, parse Parser, callback autoscan.ProcessorFunc) (http.Handler, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,6 @@ func New(c Config, parse Parser, now func() time.Time, callback autoscan.Process
 		level:    level,
 		hasLevel: hasLevel,
 		parse:    parse,
-		now:      now,
 		callback: callback,
 	}, nil
 }
@@ -78,7 +77,6 @@ type handler struct {
 	level    zerolog.Level
 	hasLevel bool
 	parse    Parser
-	now      func() time.Time
 	callback autoscan.ProcessorFunc
 }
 
@@ -143,7 +141,9 @@ func (h handler) withLogLevel(r *http.Request) *http.Request {
 // It keeps the order of the folders. It skips a folder that is empty before
 // or after the rewrite, so the processor never gets a scan for "". It
 // returns an error if a folder is not an absolute path after the rewrite.
+// The scans of one event have the same time.
 func (h handler) scans(folders []string) ([]autoscan.Scan, error) {
+	now := time.Now()
 	seen := make(map[string]bool, len(folders))
 	scans := make([]autoscan.Scan, 0, len(folders))
 
@@ -164,7 +164,7 @@ func (h handler) scans(folders []string) ([]autoscan.Scan, error) {
 		scans = append(scans, autoscan.Scan{
 			Folder:   folder,
 			Priority: h.priority,
-			Time:     h.now(),
+			Time:     now,
 		})
 	}
 

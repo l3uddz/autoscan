@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"path"
-	"time"
 
 	"github.com/rs/zerolog/hlog"
 
@@ -32,7 +31,7 @@ func New(c Config, callback autoscan.ProcessorFunc) (http.Handler, error) {
 		Priority:  c.Priority,
 		Rewrite:   c.Rewrite,
 		Verbosity: c.Verbosity,
-	}, parse, now, callback)
+	}, parse, callback)
 	if err != nil {
 		return nil, err
 	}
@@ -74,5 +73,3 @@ func parse(r *http.Request) (webhook.Event, error) {
 
 	return event, nil
 }
-
-var now = time.Now

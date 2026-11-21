@@ -37,11 +37,6 @@ func TestHandler(t *testing.T) {
 		}},
 	}
 
-	currentTime := time.Now()
-	now = func() time.Time {
-		return currentTime
-	}
-
 	var testCases = []Test{
 		{
 			"Returns bad request when no directories are given",
@@ -83,7 +78,7 @@ func TestHandler(t *testing.T) {
 			},
 			Expected{
 				StatusCode: 200,
-				Scans:      []autoscan.Scan{{Folder: "/mnt/tv/Show", Time: currentTime}},
+				Scans:      []autoscan.Scan{{Folder: "/mnt/tv/Show"}},
 			},
 		},
 		{
@@ -103,12 +98,10 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Interstellar (2014)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Parasite (2019)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -118,6 +111,10 @@ func TestHandler(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			callback := func(scans ...autoscan.Scan) error {
+				// The webhook package tests the scan time.
+				for i := range scans {
+					scans[i].Time = time.Time{}
+				}
 				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
 					t.Logf("want: %v", tc.Expected.Scans)
 					t.Logf("got:  %v", scans)
