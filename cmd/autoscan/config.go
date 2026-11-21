@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v2"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/targets/plex"
@@ -146,7 +146,7 @@ func decodeConfig(r io.Reader) (config, error) {
 	}
 
 	decoder := yaml.NewDecoder(r)
-	decoder.SetStrict(true)
+	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil {
 		return config{}, err
 	}

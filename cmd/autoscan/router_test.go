@@ -15,7 +15,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"gopkg.in/yaml.v2"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/migrate"

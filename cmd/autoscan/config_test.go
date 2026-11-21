@@ -126,6 +126,12 @@ func TestDecodeConfigRejectsUnknownKey(t *testing.T) {
 	}
 }
 
+func TestDecodeConfigRejectsDuplicateKey(t *testing.T) {
+	if _, err := decodeConfig(strings.NewReader("port: 3030\nport: 4040\n")); err == nil {
+		t.Fatal("decodeConfig returned nil error for a duplicate key")
+	}
+}
+
 func stubUserConfigDir(t *testing.T, fn func() (string, error)) {
 	t.Helper()
 	original := userConfigDirFunc
