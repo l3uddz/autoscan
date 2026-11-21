@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,20 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Returns 200 for a Windows drive root with a forward slash",
+			Given{
+				Config: Config{},
+				Query:  url.Values{"dir": []string{"C:/", `\\server\media\Show\`}},
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{Folder: "C:/"},
+					{Folder: `\\server\media\Show`},
+				},
+			},
+		},
+		{
 			"Returns 200 when given multiple directories",
 			Given{
 				Config: standardConfig,
@@ -150,5 +165,24 @@ func TestHandler(t *testing.T) {
 				t.Errorf("Status codes do not match: %d vs %d", res.StatusCode, tc.Expected.StatusCode)
 			}
 		})
+	}
+}
+
+func TestManualPageIsSelfContained(t *testing.T) {
+	handler, err := New(Config{}, func(...autoscan.Scan) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
+	if body := rec.Body.String(); strings.Contains(body, "http://") || strings.Contains(body, "https://") {
+		t.Errorf("manual page references an external URL: %s", body)
 	}
 }

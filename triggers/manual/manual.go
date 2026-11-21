@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"errors"
 	"net/http"
-	"path"
 
 	"github.com/rs/zerolog/hlog"
 
@@ -41,7 +40,7 @@ func New(c Config, callback autoscan.ProcessorFunc) (http.Handler, error) {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			rw.Header().Set("Content-Type", "text/html")
+			rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = rw.Write(template)
 		case http.MethodHead:
 			rw.WriteHeader(http.StatusOK)
@@ -66,11 +65,11 @@ func parse(r *http.Request) (webhook.Event, error) {
 
 	event := webhook.Event{Type: "Manual"}
 	for _, dir := range directories {
-		// path.Clean turns "" into ".", so check before it.
+		// CleanFolder turns "" into ".", so check before it.
 		if dir == "" {
 			return webhook.Event{}, errEmptyDirectory
 		}
-		event.Folders = append(event.Folders, path.Clean(dir))
+		event.Folders = append(event.Folders, webhook.CleanFolder(dir))
 	}
 
 	return event, nil
