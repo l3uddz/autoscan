@@ -636,6 +636,7 @@ host:
 ```
 
 Autoscan uses the value of `port` for each host entry that has no port.
+Write an IPv6 address with a port in brackets, such as `[::1]:5959`. Without a port, `::1` and `[::1]` both work.
 You need the `host` field only to listen on more than one interface.
 
 ## Other installation options
