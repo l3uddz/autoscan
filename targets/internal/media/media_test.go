@@ -39,6 +39,14 @@ func TestMatchingFindsWindowsLibrary(t *testing.T) {
 	}
 }
 
+func TestMatchingFindsLibraryRoot(t *testing.T) {
+	libraries := []Library{NewLibrary(1, "TV", "/mnt/tv")}
+
+	if got := Names(matching(libraries, "/mnt/tv")); !reflect.DeepEqual(got, []string{"TV"}) {
+		t.Errorf("Matching = %v, want [TV]", got)
+	}
+}
+
 func TestMatchingReturnsEveryLibrary(t *testing.T) {
 	libraries := []Library{
 		NewLibrary(1, "TV", "/mnt/tv"),

@@ -34,11 +34,13 @@ func NewLibrary(id int, name string, path string) Library {
 	return Library{ID: id, Name: name, Path: path}
 }
 
-// matching returns every library whose path contains folder.
+// matching returns every library whose path contains folder, or whose
+// path is folder.
 func matching(libraries []Library, folder string) []Library {
 	matches := make([]Library, 0)
 	for _, lib := range libraries {
-		if strings.HasPrefix(folder, lib.Path) {
+		root := lib.Path[:max(0, len(lib.Path)-1)]
+		if strings.HasPrefix(folder, lib.Path) || folder == root {
 			matches = append(matches, lib)
 		}
 	}
