@@ -1,3 +1,5 @@
+// Package inotify is the trigger that watches local directories with
+// inotify and makes a scan for each folder that changes.
 package inotify
 
 import (
@@ -220,33 +222,48 @@ func (t *Trigger) watchTree(root string) (bool, error) {
 		}
 
 		if err == nil {
-			if err = t.watcher.Add(path); err == nil {
-				t.log.Trace().
-					Str("path", path).
-					Msg("Watching directory")
-				return nil
-			}
-			err = fmt.Errorf("watch directory: %w", err)
+			err = t.watchDir(path)
 		}
-
-		if errors.Is(err, syscall.ENOSPC) {
-			return fmt.Errorf("%v: %w: the inotify watch limit is too low, raise fs.inotify.max_user_watches", path, err)
+		if err == nil {
+			return nil
 		}
-		if path == root {
-			return fmt.Errorf("%v: %w", path, err)
-		}
-
-		t.log.Warn().
-			Err(err).
-			Str("path", path).
-			Msg("Skipped directory")
-		if fi != nil && fi.IsDir() {
-			return filepath.SkipDir
-		}
-		return nil
+		return t.walkError(root, path, fi, err)
 	})
 
 	return hasFile, err
+}
+
+// watchDir adds a watch for the directory at path.
+func (t *Trigger) watchDir(path string) error {
+	if err := t.watcher.Add(path); err != nil {
+		return fmt.Errorf("watch directory: %w", err)
+	}
+
+	t.log.Trace().
+		Str("path", path).
+		Msg("Watching directory")
+	return nil
+}
+
+// walkError returns what the walk of watchTree does after err at path. It
+// fails the walk at root and at the inotify watch limit. Below root, it logs
+// a warning and skips the entry.
+func (t *Trigger) walkError(root, path string, fi os.FileInfo, err error) error {
+	if errors.Is(err, syscall.ENOSPC) {
+		return fmt.Errorf("%v: %w: the inotify watch limit is too low, raise fs.inotify.max_user_watches", path, err)
+	}
+	if path == root {
+		return fmt.Errorf("%v: %w", path, err)
+	}
+
+	t.log.Warn().
+		Err(err).
+		Str("path", path).
+		Msg("Skipped directory")
+	if fi != nil && fi.IsDir() {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 // getPathObject returns the watched path that contains name. If more than

@@ -1,3 +1,5 @@
+// Package emby is the target that starts a library scan of a folder on an
+// Emby server.
 package emby
 
 import (

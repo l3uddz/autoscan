@@ -1,3 +1,5 @@
+// Package autoscan is the target that sends each scan to another autoscan
+// instance.
 package autoscan
 
 import (

@@ -157,22 +157,9 @@ func run(version string) error {
 	}()
 
 	// config
-	file, err := waitForConfig(cli.Config, 5*time.Second)
+	c, err := loadConfig(cli.Config)
 	if err != nil {
-		return fmt.Errorf("open config: %w", err)
-	}
-	defer file.Close()
-
-	c, err := decodeConfig(file)
-	if err != nil {
-		return fmt.Errorf("decode config: %w", err)
-	}
-	warnings, err := validateConfig(c)
-	for _, warning := range warnings {
-		log.Warn().Msg(warning)
-	}
-	if err != nil {
-		return fmt.Errorf("check config: %w", err)
+		return err
 	}
 
 	// migrator
@@ -223,15 +210,9 @@ func run(version string) error {
 	defer stop()
 
 	// daemon triggers
-	watchers := make([]*inotify.Trigger, 0, len(c.Triggers.Inotify))
-	for _, t := range c.Triggers.Inotify {
-		watcher, err := inotify.New(t, proc.Add)
-		if err != nil {
-			return fmt.Errorf("initialise inotify trigger: %w", err)
-		}
-
-		watchers = append(watchers, watcher)
-		go watcher.Run()
+	watchers, err := startWatchers(c.Triggers.Inotify, proc.Add)
+	if err != nil {
+		return err
 	}
 
 	// http triggers
@@ -277,6 +258,23 @@ func run(version string) error {
 	defer cancel()
 	shutdown(shutdownCtx, servers, processorDone)
 	return serverErr
+}
+
+// startWatchers creates an inotify trigger for each config in configs and
+// runs each one in the background.
+func startWatchers(configs []inotify.Config, callback autoscan.ProcessorFunc) ([]*inotify.Trigger, error) {
+	watchers := make([]*inotify.Trigger, 0, len(configs))
+	for _, t := range configs {
+		watcher, err := inotify.New(t, callback)
+		if err != nil {
+			return nil, fmt.Errorf("initialise inotify trigger: %w", err)
+		}
+
+		watchers = append(watchers, watcher)
+		go watcher.Run()
+	}
+
+	return watchers, nil
 }
 
 // shutdown stops all servers at the same time, so no server accepts new

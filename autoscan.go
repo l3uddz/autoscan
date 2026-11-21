@@ -1,3 +1,6 @@
+// Package autoscan holds the core types of autoscan: the scan, the
+// processor callback of the triggers, the target interface, and the path
+// rewriters and filters.
 package autoscan
 
 import (

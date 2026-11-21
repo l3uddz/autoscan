@@ -1,0 +1,33 @@
+# golangci-lint configuration. `mise run lint` runs it, and so does the
+# required build job of CI.
+version: "2"
+
+issues:
+  # Report every finding, not only the first ones of each linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - govet # the analyzers of go vet
+    - staticcheck # staticcheck, gosimple, and stylecheck: all checks below
+    - unused # staticcheck U1000: unused code
+    - gocognit # cognitive complexity of each function
+  settings:
+    staticcheck:
+      # Every check, also the style checks. Disable a check only with a
+      # reason here.
+      checks: ["all"]
+    gocognit:
+      # A function with a cognitive complexity above this fails.
+      min-complexity: 15
+  exclusions:
+    rules:
+      # Test tables and set-up add branches, but no risk.
+      - path: _test\.go
+        linters: [gocognit]
+
+formatters:
+  enable:
+    - gofmt

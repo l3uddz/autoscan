@@ -1,3 +1,5 @@
+// Package processor stores the scans in the SQLite datastore and sends
+// each folder to the targets when it is due.
 package processor
 
 import (

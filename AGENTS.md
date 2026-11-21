@@ -32,6 +32,7 @@ start a library scan for the folder.
 | `processor/migrations/` | Embedded SQL migrations for the datastore |
 | `migrate/` | Migration runner |
 | `docker/Dockerfile` | Container image, built from the goreleaser output in `dist/` |
+| `.golangci.yml` | golangci-lint configuration: the formatter, the linters, and the complexity limit that `mise run lint` checks |
 
 ## Code changes
 
@@ -47,6 +48,8 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
 - Add abstractions, configuration, and dependencies only for current needs.
 - Before delivery, review the diff for duplicated rules, unnecessary
   abstraction, and unused code. Fix the problems that the change introduces.
+- Keep each production function at a cognitive complexity of 15 or less.
+  `mise run lint` enforces it.
 - Preserve behavior outside the requested scope. Keep input validation and
   error handling that prevents lost work.
 
@@ -82,7 +85,7 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
 ## Checks
 
 You need [mise](https://mise.jdx.dev). Run `mise install` once to install
-the Go and goreleaser versions from `mise.toml`. CI installs the same
+the Go, goreleaser, and golangci-lint versions from `mise.toml`. CI installs the same
 versions. Run `mise tasks` to list the tasks.
 
 The required `build` job runs the following commands in order before
@@ -99,9 +102,20 @@ mise run lint
 commit those changes with the change that caused them. If `go mod tidy`
 changes the committed files, CI fails.
 
-`mise run lint` runs `gofmt` on tracked Go files, then `go vet ./...`, and then a
-pinned `staticcheck`. If `gofmt` lists a file, the task fails. A lint failure
-fails the `build` job.
+`mise run lint` runs golangci-lint with the configuration in
+`.golangci.yml`. A lint failure fails the `build` job.
+
+- `golangci-lint fmt --diff` fails if a file needs `gofmt`. Then run
+  `mise run format`, which rewrites the files in the `gofmt` format.
+- `golangci-lint run` runs the analyzers of `go vet`, every staticcheck
+  check, including the style checks (`ST*`) and unused code (`U1000`), and
+  `gocognit`.
+- `gocognit` fails a production function with a cognitive complexity
+  above 15. Tests are exempt. Split a function that grows above the limit
+  into named steps.
+- Fix each finding. Do not hide one with a `//nolint` comment. Disable a
+  check only in `.golangci.yml`, with the reason in a comment, and only
+  after the maintainer agrees.
 
 A separate `govulncheck` job in the `ci` workflow checks for known
 vulnerabilities. It is not a required check, so a new advisory does not block

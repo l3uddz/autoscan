@@ -1,3 +1,5 @@
+// Package migrate applies the embedded SQL migrations of a component to the
+// database in order, and records each migration that it applied.
 package migrate
 
 import (

@@ -1,3 +1,5 @@
+// Package manual is the webhook trigger that scans the folders that a user
+// enters on its web page or sends in a request.
 package manual
 
 import (

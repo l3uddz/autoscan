@@ -1,3 +1,4 @@
+// Package radarr is the webhook trigger for Radarr.
 package radarr
 
 import (

@@ -1,3 +1,4 @@
+// Package readarr is the webhook trigger for Readarr.
 package readarr
 
 import (
