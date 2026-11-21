@@ -209,8 +209,8 @@ func run(version string) error {
 		Strs("anchors", c.Anchors).
 		Msg("Initialised processor")
 
-	// Check authentication. If no auth -> warn user.
-	if c.Auth.Username == "" || c.Auth.Password == "" {
+	// validateConfig already warns when only one of the two values is set.
+	if c.Auth.Username == "" && c.Auth.Password == "" {
 		log.Warn().Msg("Webhooks running without authentication")
 	}
 
