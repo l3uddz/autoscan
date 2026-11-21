@@ -45,6 +45,12 @@ func (c apiClient) Version(ctx context.Context) (string, error) {
 	return resp.MediaContainer.Version, nil
 }
 
+// Available checks that the server answers with its version.
+func (c apiClient) Available(ctx context.Context) error {
+	_, err := c.Version(ctx)
+	return err
+}
+
 func (c apiClient) Libraries(ctx context.Context) ([]media.Library, error) {
 	var resp struct {
 		MediaContainer struct {
@@ -72,7 +78,18 @@ func (c apiClient) Libraries(ctx context.Context) ([]media.Library, error) {
 	return libraries, nil
 }
 
-func (c apiClient) Scan(ctx context.Context, path string, libraryID int) error {
+// Scan refreshes path in each library of libs.
+func (c apiClient) Scan(ctx context.Context, path string, libs []media.Library) error {
+	for _, lib := range libs {
+		if err := c.refresh(ctx, path, lib.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// refresh asks Plex to scan path in the library with libraryID.
+func (c apiClient) refresh(ctx context.Context, path string, libraryID int) error {
 	query := url.Values{"path": {path}}
 	if err := c.http.Send(ctx, http.MethodGet, query, "library", "sections", strconv.Itoa(libraryID), "refresh"); err != nil {
 		return fmt.Errorf("scan: %w", err)

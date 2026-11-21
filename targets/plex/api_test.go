@@ -4,11 +4,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
 func TestScanRefreshesLibraryPath(t *testing.T) {
@@ -24,7 +26,7 @@ func TestScanRefreshesLibraryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.Scan(t.Context(), "/mnt/tv/Show", 5); err != nil {
+	if err := api.Scan(t.Context(), "/mnt/tv/Show", []media.Library{{ID: 5}}); err != nil {
 		t.Fatalf("Scan returned %v", err)
 	}
 
@@ -34,14 +36,15 @@ func TestScanRefreshesLibraryPath(t *testing.T) {
 }
 
 func TestNewReadsVersionAndLibraries(t *testing.T) {
+	var refreshed []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
 			w.Write([]byte(`{"MediaContainer":{"Version":"1.32.0"}}`))
 		case "/library/sections":
-			w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"5","title":"TV","Location":[{"path":"/mnt/tv"}]}]}}`))
+			w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"5","title":"TV","Location":[{"path":"/mnt/tv"}]},{"key":"6","title":"TV 4K","Location":[{"path":"/mnt/tv"}]}]}}`))
 		default:
-			http.NotFound(w, r)
+			refreshed = append(refreshed, r.URL.Path)
 		}
 	}))
 	defer srv.Close()
@@ -51,12 +54,11 @@ func TestNewReadsVersionAndLibraries(t *testing.T) {
 		t.Fatalf("New returned %v", err)
 	}
 
-	libs, err := got.(*target).libraries.Matching(t.Context(), "/mnt/tv/Show")
-	if err != nil {
-		t.Fatalf("Matching returned %v", err)
+	if err := got.Scan(t.Context(), autoscan.Scan{Folder: "/mnt/tv/Show"}); err != nil {
+		t.Fatalf("Scan returned %v", err)
 	}
-	if len(libs) != 1 || libs[0].ID != 5 || libs[0].Name != "TV" || libs[0].Path != "/mnt/tv/" {
-		t.Errorf("Libraries = %+v, want one TV library with ID 5 at /mnt/tv/", libs)
+	if want := []string{"/library/sections/5/refresh", "/library/sections/6/refresh"}; !reflect.DeepEqual(refreshed, want) {
+		t.Errorf("refreshed %v, want %v", refreshed, want)
 	}
 }
 

@@ -99,35 +99,56 @@ func SendUpdated(ctx context.Context, c *httpapi.Client, prefix []string, path s
 	return c.PostJSON(ctx, payload, slices.Concat(prefix, []string{"Library", "Media", "Updated"})...)
 }
 
-// A PathAPI is a media server client whose scan request takes only a path.
-type PathAPI interface {
+// An API is the client of one media server.
+type API interface {
 	Available(ctx context.Context) error
-	Scan(ctx context.Context, path string) error
+	Libraries(ctx context.Context) ([]Library, error)
+
+	// Scan asks the server to scan folder, which is in libs. Plex scans each
+	// library. Emby and Jellyfin find the libraries from the path, so they
+	// send one request even for a folder in several libraries.
+	Scan(ctx context.Context, folder string, libs []Library) error
 }
 
-// PathTarget is the autoscan.Target for Emby and Jellyfin. Their scan request
-// takes a path and no library, and the server finds the items for that path.
-// So PathTarget sends one request for each scan folder, even if the folder is
-// in more than one library.
-type PathTarget struct {
+// Logger returns the logger of a target of kind for c. The url field omits
+// the password and the secretParams query parameters.
+func Logger(kind string, c Config, secretParams ...string) zerolog.Logger {
+	return autoscan.GetLogger(c.Verbosity).With().
+		Str("target", kind).
+		Str("url", httpapi.RedactURL(c.URL, secretParams...)).
+		Logger()
+}
+
+// Target is the autoscan.Target for Plex, Emby, and Jellyfin.
+type Target struct {
 	log       zerolog.Logger
 	rewrite   autoscan.Rewriter
 	libraries *LibraryList
-	api       PathAPI
+	api       API
 }
 
-// NewPathTarget returns a PathTarget.
-func NewPathTarget(log zerolog.Logger, rewrite autoscan.Rewriter, libraries *LibraryList, api PathAPI) *PathTarget {
-	return &PathTarget{log: log, rewrite: rewrite, libraries: libraries, api: api}
+// NewTarget reads the libraries through api and returns the target for c.
+func NewTarget(ctx context.Context, log zerolog.Logger, c Config, api API) (*Target, error) {
+	rewrite, err := autoscan.NewRewriter(c.Rewrite)
+	if err != nil {
+		return nil, err
+	}
+
+	libraries, err := NewLibraryList(ctx, log, api.Libraries)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Target{log: log, rewrite: rewrite, libraries: libraries, api: api}, nil
 }
 
-func (t *PathTarget) Available(ctx context.Context) error {
+func (t *Target) Available(ctx context.Context) error {
 	return t.api.Available(ctx)
 }
 
 // Scan sends the rewritten scan folder to the media server. If the folder
 // is in no library, Scan sends nothing and returns autoscan.ErrNoLibrary.
-func (t *PathTarget) Scan(ctx context.Context, scan autoscan.Scan) error {
+func (t *Target) Scan(ctx context.Context, scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
 	libs, err := t.libraries.Matching(ctx, scanFolder)
@@ -145,7 +166,7 @@ func (t *PathTarget) Scan(ctx context.Context, scan autoscan.Scan) error {
 
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(ctx, scanFolder); err != nil {
+	if err := t.api.Scan(ctx, scanFolder, libs); err != nil {
 		return err
 	}
 

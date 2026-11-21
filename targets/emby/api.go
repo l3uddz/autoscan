@@ -67,7 +67,8 @@ func (c apiClient) Libraries(ctx context.Context) ([]media.Library, error) {
 	return libraries, nil
 }
 
-func (c apiClient) Scan(ctx context.Context, path string) error {
+// Scan sends path to the server, which finds its libraries itself.
+func (c apiClient) Scan(ctx context.Context, path string, _ []media.Library) error {
 	if err := media.SendUpdated(ctx, c.http, apiRoot, path, "Created"); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}

@@ -94,22 +94,22 @@ func TestSendUpdated(t *testing.T) {
 }
 
 type fakeAPI struct {
-	err   error
-	paths []string
+	libraries []Library
+	err       error
+	paths     []string
 }
 
 func (f *fakeAPI) Available(context.Context) error { return f.err }
 
-func (f *fakeAPI) Scan(_ context.Context, path string) error {
+func (f *fakeAPI) Libraries(context.Context) ([]Library, error) { return f.libraries, nil }
+
+func (f *fakeAPI) Scan(_ context.Context, path string, _ []Library) error {
 	f.paths = append(f.paths, path)
 	return f.err
 }
 
-func TestPathTargetScan(t *testing.T) {
-	rewrite, err := autoscan.NewRewriter([]autoscan.Rewrite{{From: "^/data/", To: "/mnt/"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestTargetScan(t *testing.T) {
+	config := Config{Rewrite: []autoscan.Rewrite{{From: "^/data/", To: "/mnt/"}}}
 	libraries := []Library{NewLibrary(0, "TV", "/mnt/tv"), NewLibrary(0, "TV 4K", "/mnt/tv")}
 
 	type Test struct {
@@ -128,12 +128,11 @@ func TestPathTargetScan(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			api := &fakeAPI{err: tc.APIErr}
-			list, err := NewLibraryList(t.Context(), zerolog.Nop(), func(context.Context) ([]Library, error) { return libraries, nil })
+			api := &fakeAPI{libraries: libraries, err: tc.APIErr}
+			target, err := NewTarget(t.Context(), zerolog.Nop(), config, api)
 			if err != nil {
 				t.Fatal(err)
 			}
-			target := NewPathTarget(zerolog.Nop(), rewrite, list, api)
 
 			err = target.Scan(t.Context(), autoscan.Scan{Folder: tc.Folder})
 			if !errors.Is(err, tc.WantErr) || (err == nil) != (tc.WantErr == nil) {
