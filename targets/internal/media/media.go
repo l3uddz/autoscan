@@ -19,11 +19,16 @@ type Library struct {
 	Path string
 }
 
-// NewLibrary returns a Library whose path ends with a slash, so that
-// /mnt/tv does not match the folder /mnt/tv2/Show.
+// NewLibrary returns a Library whose path ends with a separator, so that
+// /mnt/tv does not match the folder /mnt/tv2/Show. A Windows path that
+// separates its folders with backslashes, such as C:\TV, gets a backslash.
 func NewLibrary(id int, name string, path string) Library {
-	if path != "" && !strings.HasSuffix(path, "/") {
-		path += "/"
+	separator := "/"
+	if strings.Contains(path, `\`) && !strings.Contains(path, "/") {
+		separator = `\`
+	}
+	if path != "" && !strings.HasSuffix(path, separator) {
+		path += separator
 	}
 
 	return Library{ID: id, Name: name, Path: path}

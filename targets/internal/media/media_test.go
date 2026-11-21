@@ -22,6 +22,23 @@ func TestNewLibraryAddsTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestNewLibraryKeepsWindowsSeparator(t *testing.T) {
+	for path, want := range map[string]string{`C:\TV`: `C:\TV\`, `\\server\tv\`: `\\server\tv\`, "C:/TV": "C:/TV/"} {
+		if got := NewLibrary(1, "TV", path).Path; got != want {
+			t.Errorf("NewLibrary path %q = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestMatchingFindsWindowsLibrary(t *testing.T) {
+	libraries := []Library{NewLibrary(1, "TV", `C:\TV`), NewLibrary(2, "TV 2", `C:\TV2`)}
+
+	got := Names(matching(libraries, `C:\TV\Show\Season 1`))
+	if want := []string{"TV"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Matching = %v, want %v", got, want)
+	}
+}
+
 func TestMatchingReturnsEveryLibrary(t *testing.T) {
 	libraries := []Library{
 		NewLibrary(1, "TV", "/mnt/tv"),
