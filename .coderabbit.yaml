@@ -50,7 +50,8 @@ reviews:
         Focus on correctness: error handling, lost or shadowed errors,
         concurrency, resource leaks, and behavior changes for existing
         configuration files. Do not ask for doc comments or docstrings.
-        Do not report formatting that gofmt or go vet already checks.
+        Do not report findings that golangci-lint already checks:
+        formatting, go vet, staticcheck, and the complexity limit.
     - path: "**/*_test.go"
       instructions: >-
         Check that each test asserts behavior and fails without the change.
