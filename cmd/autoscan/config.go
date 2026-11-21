@@ -183,8 +183,8 @@ func checkTriggerNames(c config) []error {
 			switch {
 			case seen[t.Name]:
 				errs = append(errs, fmt.Errorf("trigger name %q is used more than once", t.Name))
-			case t.Name == "manual":
-				errs = append(errs, errors.New(`trigger name "manual" is reserved for the manual trigger`))
+			case t.Name == "manual" || t.Name == "manual/":
+				errs = append(errs, fmt.Errorf("trigger name %q is reserved for the manual trigger", t.Name))
 			case strings.ContainsAny(t.Name, "{}*"):
 				errs = append(errs, fmt.Errorf("trigger name %q contains a route pattern character: {, }, or *", t.Name))
 			}

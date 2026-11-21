@@ -187,6 +187,11 @@ func TestValidateConfig(t *testing.T) {
 			WantErr: `trigger name "manual" is reserved`,
 		},
 		{
+			Name:    "Trigger name below the manual route",
+			YAML:    "triggers:\n  sonarr:\n    - name: manual/\n",
+			WantErr: `trigger name "manual/" is reserved`,
+		},
+		{
 			Name:    "Trigger name with a route pattern",
 			YAML:    "triggers:\n  readarr:\n    - name: \"{id}\"\n",
 			WantErr: `trigger name "{id}" contains`,

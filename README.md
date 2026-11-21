@@ -191,7 +191,8 @@ In that case, each trigger MUST have a `name` field with a unique value.
 Autoscan uses the name to create the route `/triggers/:name`.
 All -arr triggers share these routes, so a name must be unique across Lidarr, Radarr, Readarr, and Sonarr.
 Only one -arr trigger can omit the name. Its route is `/triggers/`.
-A name cannot be `manual`, and it cannot contain `{`, `}`, or `*`.
+A name cannot be `manual` or `manual/`, because the manual trigger uses those routes.
+A name cannot contain `{`, `}`, or `*`.
 Autoscan stops at startup if a name breaks these rules.
 
 Autoscan provides these -arrs:
