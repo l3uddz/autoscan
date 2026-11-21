@@ -192,7 +192,7 @@ In that case, each trigger MUST have a `name` field with a unique value.
 Autoscan uses the name to create the route `/triggers/:name`.
 All -arr triggers share these routes, so a name must be unique across Lidarr, Radarr, Readarr, and Sonarr.
 Only one -arr trigger can omit the name. Its route is `/triggers/`.
-A name cannot be `manual` or `manual/`, because the manual trigger uses those routes.
+A name cannot be `manual`, start with `manual/`, or start with `/`, because the manual trigger and route table reserve those paths.
 A name cannot contain `{`, `}`, or `*`.
 Autoscan stops at startup if a name breaks these rules.
 
@@ -247,8 +247,8 @@ It closes an idle keep-alive connection after 2 minutes.
 #### Stopping Autoscan
 
 When Autoscan gets SIGINT or SIGTERM after startup, it stops accepting requests and finishes the open requests.
-It also stops scan delivery.
-Autoscan waits up to 8 seconds for open requests and deliveries, and then exits.
+It also stops scan delivery, stops the Inotify triggers, and flushes pending Inotify scans to the datastore.
+Autoscan waits up to 8 seconds for open requests and background workers, and then exits.
 A delivery that does not finish in that time stays queued, and Autoscan sends it after the next start.
 
 ### Configuration
@@ -440,7 +440,7 @@ If every target is retrying, the endpoint returns HTTP 503 with an empty `blocke
 ## Targets
 
 Targets are the final destination of Scans.
-Autoscan waits up to 30 seconds for each request to a target.
+Autoscan waits up to 30 seconds for each request to a target and reads at most 10 MiB from a JSON response.
 After the first failure at startup or during a scan, Autoscan retries that target after 15 seconds.
 Each consecutive failure doubles that target's delay up to one hour.
 Autoscan continues to retry every hour until the target recovers.
@@ -452,7 +452,7 @@ A successful scan resets the retry delay.
 A target can reject one scan while it accepts others, for example with 400 Bad Request.
 If a target rejects the same scan 5 times in a row and the server stays available, Autoscan sets that scan aside for that target.
 Autoscan logs an error with the folder and continues with the next scan.
-An error that means that the target is unavailable, such as a timeout or 503 Service Unavailable, never sets a scan aside.
+An error that means that the target is unavailable, such as a timeout, 429 Too Many Requests, or 503 Service Unavailable, never sets a scan aside.
 Autoscan sets aside at most one scan between two successful scans.
 If the next scan also fails, Autoscan keeps it and retries the target as usual.
 Each new event for a folder queues a scan for all configured targets.
@@ -659,12 +659,12 @@ host:
 Autoscan uses the value of `port` for each host entry that has no port.
 The port must be between 0 and 65535.
 Write an IPv6 address with a port in brackets, such as `[::1]:5959`. Without a port, `::1` and `[::1]` both work.
-You need the `host` field only to listen on more than one interface.
+You need the `host` field only to listen on more than one interface. If you set `host`, it must contain at least one address.
 
 ### Configuration checks
 
 Autoscan checks the configuration at startup.
-If a value cannot work, such as an invalid target URL, an empty inotify `path`, or a duplicate trigger name, Autoscan stops with an error.
+If a value cannot work, such as an invalid target URL, an empty `host` list, an empty inotify `path`, or a duplicate trigger name, Autoscan stops with an error.
 If a value works but is likely a mistake, Autoscan logs a warning and starts. These values cause a warning:
 
 - A negative `minimum-age`, `scan-delay`, or `scan-stats`.
