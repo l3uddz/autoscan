@@ -49,7 +49,9 @@ func defaultConfigDirectory(app string, filename string) string {
 	ucd, err := userConfigDirFunc()
 	if err == nil && ucd != "" {
 		acd := filepath.Join(ucd, app)
-		mkErr := os.MkdirAll(acd, os.ModePerm)
+		// The directory holds the tokens in config.yml, so only the owner
+		// can read it. MkdirAll keeps the mode of an existing directory.
+		mkErr := os.MkdirAll(acd, 0o700)
 		if mkErr == nil {
 			return acd
 		}

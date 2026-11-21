@@ -24,8 +24,13 @@ func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
 		t.Fatalf("expected %s, got %s", want, dir)
 	}
 
-	if _, err := os.Stat(want); err != nil {
+	info, err := os.Stat(want)
+	if err != nil {
 		t.Fatalf("expected config directory %s to exist: %v", want, err)
+	}
+	// The directory holds the tokens, so only the owner can read it.
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("config directory mode = %o, want 700", perm)
 	}
 
 	if bcd := getBinaryPath(); bcd != binDir {
