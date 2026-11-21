@@ -70,7 +70,8 @@ This field can contain multiple rules.
 Start each rule with a `-`.
 The `from` field is a regular expression (regexp) that matches the path as the trigger sees it.
 The `to` field converts that path into a path that is local to Autoscan.
-After the rewrite, each folder of a webhook trigger must be an absolute path, such as `/mnt/tv` or `C:\TV`.
+After the rewrite, each folder of a webhook trigger must be an absolute path, such as `/mnt/tv`, `C:\TV`, or `\\server\tv`.
+A Windows drive letter needs a separator after the colon: `C:TV` and `C:` are relative paths.
 If a folder is still relative, the trigger responds with 400 Bad Request and queues no scan for that request.
 
 Targets work the other way around.
