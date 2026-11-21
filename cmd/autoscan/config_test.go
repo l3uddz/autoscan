@@ -137,6 +137,24 @@ func TestDecodeConfigAcceptsNumericDurations(t *testing.T) {
 	}
 }
 
+func TestDecodeConfigZeroesExplicitNulls(t *testing.T) {
+	const input = "minimum-age: null\nscan-delay: ~\nscan-stats:\nport: null\nhost: null\n"
+	c, err := decodeConfig(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("decodeConfig returned %v", err)
+	}
+	if time.Duration(c.MinimumAge) != 0 || time.Duration(c.ScanDelay) != 0 || time.Duration(c.ScanStats) != 0 {
+		t.Errorf("durations = (%v, %v, %v), want all 0",
+			time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), time.Duration(c.ScanStats))
+	}
+	if c.Port != 0 {
+		t.Errorf("port = %d, want 0", c.Port)
+	}
+	if c.Host != nil {
+		t.Errorf("host = %q, want nil", c.Host)
+	}
+}
+
 func TestDecodeConfigRejectsUnknownKey(t *testing.T) {
 	if _, err := decodeConfig(strings.NewReader("prot: 4040\n")); err == nil {
 		t.Fatal("decodeConfig returned nil error for an unknown key")

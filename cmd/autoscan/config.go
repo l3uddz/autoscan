@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -160,8 +161,14 @@ func (d *yamlDuration) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // decodeConfig decodes the YAML configuration in r over the default values.
-// It returns an error for a key that config does not define.
+// It returns an error for a key that config does not define. Explicit YAML
+// nulls zero the corresponding defaulted fields, matching yaml.v2 behavior.
 func decodeConfig(r io.Reader) (config, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return config{}, err
+	}
+
 	c := config{
 		MinimumAge: yamlDuration(10 * time.Minute),
 		ScanDelay:  yamlDuration(5 * time.Second),
@@ -170,13 +177,54 @@ func decodeConfig(r io.Reader) (config, error) {
 		Port:       3030,
 	}
 
-	decoder := yaml.NewDecoder(r)
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil {
 		return config{}, err
 	}
 
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return config{}, err
+	}
+	applyExplicitNulls(&doc, &c)
+
 	return c, nil
+}
+
+// applyExplicitNulls zeroes defaulted top-level fields that the YAML document
+// explicitly sets to null (such as "scan-stats:" or "minimum-age: null").
+// yaml.v3 leaves pre-initialized struct fields untouched on null, whereas
+// yaml.v2 zeroed them.
+func applyExplicitNulls(doc *yaml.Node, c *config) {
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return
+	}
+	mapping := doc.Content[0].Content
+	for i := 0; i+1 < len(mapping); i += 2 {
+		if !isNullNode(mapping[i+1]) {
+			continue
+		}
+		switch mapping[i].Value {
+		case "minimum-age":
+			c.MinimumAge = 0
+		case "scan-delay":
+			c.ScanDelay = 0
+		case "scan-stats":
+			c.ScanStats = 0
+		case "port":
+			c.Port = 0
+		case "host":
+			c.Host = nil
+		}
+	}
+}
+
+func isNullNode(n *yaml.Node) bool {
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	return n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null"
 }
 
 // validateConfig returns an error for each value of c that cannot work, and
