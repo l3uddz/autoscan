@@ -596,7 +596,14 @@ func TestConcurrentWatchDirAndRenameLeavesNoStaleWatches(t *testing.T) {
 		rename(t, parent, filepath.Join(outside, name))
 		<-regDone
 
-		waitFor(t, 2*time.Second, "watches below renamed parent to clear", func() bool {
+		waitFor(t, 2*time.Second, "watches and index below renamed parent to clear", func() bool {
+			d.watchedMu.Lock()
+			defer d.watchedMu.Unlock()
+			for watched := range d.watched {
+				if isWithin(watched, parent) {
+					return false
+				}
+			}
 			for _, watched := range d.watcher.WatchList() {
 				if isWithin(watched, parent) {
 					return false
@@ -604,15 +611,70 @@ func TestConcurrentWatchDirAndRenameLeavesNoStaleWatches(t *testing.T) {
 			}
 			return true
 		})
+	}
+}
 
-		d.watchedMu.Lock()
-		for watched := range d.watched {
-			if isWithin(watched, parent) {
-				d.watchedMu.Unlock()
-				t.Fatalf("iteration %d: stale index entry %q remains below renamed parent", i, watched)
-			}
+func TestDestinationWatchedBeforeSourceCleanupStaysWatched(t *testing.T) {
+	srcRoot, dstRoot := t.TempDir(), t.TempDir()
+	srcShow := filepath.Join(srcRoot, "Show")
+	srcSeason := filepath.Join(srcShow, "Season 1")
+	mkdirAll(t, srcSeason)
+
+	rewriter, err := autoscan.NewRewriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filterer, err := autoscan.NewFilterer(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = watcher.Close() })
+
+	d := &Trigger{
+		paths: []*path{
+			{Path: srcRoot, Rewriter: rewriter, Allowed: filterer},
+			{Path: dstRoot, Rewriter: rewriter, Allowed: filterer},
+		},
+		watcher: watcher,
+		log:     zerolog.Nop(),
+	}
+	if _, err := d.watchTree(t.Context(), srcRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.watchTree(t.Context(), dstRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	dstShow := filepath.Join(dstRoot, "Show")
+	dstSeason := filepath.Join(dstShow, "Season 1")
+	rename(t, srcShow, dstShow)
+
+	// Watch the destination tree BEFORE source rename cleanup runs. Without
+	// evicting the stale inode watch first, fsnotify keeps the watch under the
+	// old source path and subsequent source cleanup drops the destination watch.
+	if _, err := d.watchTree(t.Context(), dstShow); err != nil {
+		t.Fatal(err)
+	}
+	d.rewatchLostRoot(fsnotify.Event{Name: srcShow, Op: fsnotify.Rename}, func(*path) {})
+
+	assertWatched(t, d, dstShow, dstSeason)
+	for _, watched := range d.watcher.WatchList() {
+		if isWithin(watched, srcShow) {
+			t.Errorf("stale source watch %q remains", watched)
 		}
-		d.watchedMu.Unlock()
+	}
+
+	// Drain rename events from the move, then verify new files in the moved
+	// destination produce scans under the destination path.
+	_ = receiveScans(t, d)
+	writeFile(t, filepath.Join(dstSeason, "episode.mkv"))
+	scans := receiveScans(t, d)
+	if !slices.Contains(scans, dstSeason) {
+		t.Errorf("Got scans %q, want %q for file added in moved destination", scans, dstSeason)
 	}
 }
 

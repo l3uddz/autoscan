@@ -3,6 +3,7 @@
 package inotify
 
 import (
+	"context"
 	"syscall"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func cpuTime(t *testing.T) time.Duration {
 }
 
 func TestQueueIdlesWhileScanWaits(t *testing.T) {
-	q := newQueue(t.Context(), func(...autoscan.Scan) error { return nil }, zerolog.Nop(), 0)
+	q := newQueue(t.Context(), func(context.Context, ...autoscan.Scan) error { return nil }, zerolog.Nop(), 0)
 	defer q.stop()
 
 	// The scan waits for the queue delay, which is longer than the window.

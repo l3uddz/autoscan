@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -19,7 +20,7 @@ func TestQueueRetriesFailedScan(t *testing.T) {
 		folder := filepath.FromSlash("/mnt/media/show")
 		attempts := make(chan autoscan.Scan, 4)
 		firstAttempt := true
-		q := newQueue(t.Context(), func(scans ...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(_ context.Context, scans ...autoscan.Scan) error {
 			for _, scan := range scans {
 				select {
 				case attempts <- scan:
@@ -65,7 +66,7 @@ func TestQueueRetriesFailedScan(t *testing.T) {
 func TestQueueCapsRetryDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts atomic.Int32
-		q := newQueue(t.Context(), func(...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(context.Context, ...autoscan.Scan) error {
 			attempts.Add(1)
 			return errors.New("queue write failed")
 		}, zerolog.Nop(), 0)
@@ -97,7 +98,7 @@ func TestQueueCapsRetryDelay(t *testing.T) {
 func TestQueueSendsOneScanAfterDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		scans := make(chan autoscan.Scan, 4)
-		q := newQueue(t.Context(), func(accepted ...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(_ context.Context, accepted ...autoscan.Scan) error {
 			for _, scan := range accepted {
 				select {
 				case scans <- scan:
@@ -141,7 +142,7 @@ func TestQueueSendsOneScanAfterDelay(t *testing.T) {
 func TestQueueFlushesPendingScansOnStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var flushed []autoscan.Scan
-		q := newQueue(t.Context(), func(accepted ...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(_ context.Context, accepted ...autoscan.Scan) error {
 			flushed = append(flushed, accepted...)
 			return nil
 		}, zerolog.Nop(), 3)
@@ -161,7 +162,7 @@ func TestQueueFlushesPendingScansOnCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		var flushed []autoscan.Scan
-		q := newQueue(ctx, func(accepted ...autoscan.Scan) error {
+		q := newQueue(ctx, func(_ context.Context, accepted ...autoscan.Scan) error {
 			flushed = append(flushed, accepted...)
 			return nil
 		}, zerolog.Nop(), 3)
@@ -182,7 +183,7 @@ func TestQueueFlushRetriesTransientErrorOnStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts int
 		var flushed []autoscan.Scan
-		q := newQueue(t.Context(), func(accepted ...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(_ context.Context, accepted ...autoscan.Scan) error {
 			attempts++
 			if attempts < 3 {
 				return errors.New("datastore busy")
@@ -214,7 +215,7 @@ func TestQueueFlushRetriesTransientErrorOnStop(t *testing.T) {
 func TestQueueFlushStopsRetryingAfterBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts int
-		q := newQueue(t.Context(), func(...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(context.Context, ...autoscan.Scan) error {
 			attempts++
 			return errors.New("datastore unavailable")
 		}, zerolog.Nop(), 3)
@@ -231,6 +232,69 @@ func TestQueueFlushStopsRetryingAfterBudget(t *testing.T) {
 		}
 		if elapsed != flushRetryTimeout {
 			t.Errorf("flush duration = %v, want %v", elapsed, flushRetryTimeout)
+		}
+	})
+}
+
+func TestQueueFlushCancelsSlowCallbackAtBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var attempts int
+		q := newQueue(t.Context(), func(ctx context.Context, _ ...autoscan.Scan) error {
+			attempts++
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+				return nil
+			}
+		}, zerolog.Nop(), 3)
+
+		q.inputs <- "/mnt/media/show/"
+		synctest.Wait()
+
+		start := time.Now()
+		q.stop()
+		elapsed := time.Since(start)
+
+		if attempts != 1 {
+			t.Errorf("flush attempts = %d, want 1", attempts)
+		}
+		if elapsed != flushRetryTimeout {
+			t.Errorf("flush duration = %v, want %v", elapsed, flushRetryTimeout)
+		}
+	})
+}
+
+func TestQueueProcessStopsOnCancelAndFlushesRemaining(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		var normalCalls int
+		var saved []string
+		q := newQueue(ctx, func(cbCtx context.Context, accepted ...autoscan.Scan) error {
+			if cbCtx == ctx {
+				normalCalls++
+				cancel()
+			}
+			for _, s := range accepted {
+				saved = append(saved, s.Folder)
+			}
+			return nil
+		}, zerolog.Nop(), 3)
+
+		first := filepath.FromSlash("/mnt/media/show1")
+		second := filepath.FromSlash("/mnt/media/show2")
+		q.inputs <- first
+		q.inputs <- second
+
+		time.Sleep(queueDelay)
+		<-q.done
+
+		if normalCalls != 1 {
+			t.Errorf("normal process callbacks = %d, want 1 before shutdown flush", normalCalls)
+		}
+		slices.Sort(saved)
+		if want := []string{first, second}; !slices.Equal(saved, want) {
+			t.Errorf("saved scans = %q, want %q", saved, want)
 		}
 	})
 }

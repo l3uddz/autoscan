@@ -50,6 +50,11 @@ const (
 	watchRetryMax = 5 * time.Minute
 )
 
+type watchEntry struct {
+	id    fileID
+	hasID bool
+}
+
 // A Trigger watches the paths of one inotify configuration and sends the
 // scans to the processor.
 type Trigger struct {
@@ -57,11 +62,12 @@ type Trigger struct {
 	watcher  *fsnotify.Watcher
 	queue    *queue
 	log      zerolog.Logger
-	callback autoscan.ProcessorFunc
+	callback func(context.Context, ...autoscan.Scan) error
 	priority int
 
 	watchedMu       sync.Mutex
-	watched         map[string]struct{}
+	watched         map[string]watchEntry
+	watchedByID     map[fileID]string
 	watchedSubtrees map[string]int
 
 	walkDir func(string, fs.WalkDirFunc) error
@@ -88,6 +94,14 @@ type Status struct {
 // New returns a trigger that watches the paths of c and sends the scans to
 // callback. The caller starts it with Run.
 func New(c Config, callback autoscan.ProcessorFunc) (*Trigger, error) {
+	return NewWithContext(c, func(_ context.Context, scans ...autoscan.Scan) error {
+		return callback(scans...)
+	})
+}
+
+// NewWithContext returns a trigger like New whose callback receives a context
+// so datastore writes respect cancellation and the shutdown flush budget.
+func NewWithContext(c Config, callback func(context.Context, ...autoscan.Scan) error) (*Trigger, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("trigger", "inotify").
 		Logger()
@@ -290,14 +304,14 @@ func (t *Trigger) watchTree(ctx context.Context, root string) (bool, error) {
 
 // watchDir adds a watch for the directory at path. It holds watchedMu across
 // watcher.Add and updating the index so concurrent rename cleanup never misses
-// a newly registered watch.
+// a newly registered watch. If path was moved from another watched tree before
+// cleanup removed the old watch, watchDir evicts the stale source watch first
+// so fsnotify binds the watch descriptor to path instead of keeping the old
+// path for the same inode.
 func (t *Trigger) watchDir(path string) error {
 	clean := filepath.Clean(path)
 	t.watchedMu.Lock()
-	err := t.watcher.Add(clean)
-	if err == nil {
-		t.addWatched(clean)
-	}
+	err := t.watchDirLocked(clean)
 	t.watchedMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("watch directory: %w", err)
@@ -309,23 +323,65 @@ func (t *Trigger) watchDir(path string) error {
 	return nil
 }
 
-func (t *Trigger) addWatched(clean string) {
-	if t.watched == nil {
-		t.watched = make(map[string]struct{})
-		t.watchedSubtrees = make(map[string]int)
+func (t *Trigger) watchDirLocked(clean string) error {
+	id, hasID := statFileID(clean)
+	if hasID {
+		t.evictStaleWatchLocked(clean, id)
 	}
-	if _, exists := t.watched[clean]; exists {
-		return
+	if err := t.watcher.Add(clean); err != nil {
+		return err
 	}
-	t.watched[clean] = struct{}{}
-	t.adjustSubtreeCounts(clean, 1)
+	t.addWatchedLocked(clean, id, hasID)
+	return nil
 }
 
-func (t *Trigger) deleteWatched(clean string) {
-	if _, exists := t.watched[clean]; !exists {
+func (t *Trigger) evictStaleWatchLocked(clean string, id fileID) {
+	if existing, ok := t.watched[clean]; ok && existing.hasID && existing.id != id {
+		t.deleteWatchedLocked(clean)
+		_ = t.watcher.Remove(clean)
+	}
+
+	oldPath, ok := t.watchedByID[id]
+	if !ok || oldPath == clean {
+		return
+	}
+	if curID, curOK := statFileID(oldPath); curOK && curID == id {
+		return
+	}
+	t.deleteWatchedLocked(oldPath)
+	_ = t.watcher.Remove(oldPath)
+}
+
+func (t *Trigger) addWatchedLocked(clean string, id fileID, hasID bool) {
+	if t.watched == nil {
+		t.watched = make(map[string]watchEntry)
+		t.watchedByID = make(map[fileID]string)
+		t.watchedSubtrees = make(map[string]int)
+	}
+	prev, exists := t.watched[clean]
+	if exists && prev.hasID && t.watchedByID[prev.id] == clean {
+		delete(t.watchedByID, prev.id)
+	}
+	t.watched[clean] = watchEntry{id: id, hasID: hasID}
+	if hasID {
+		if _, owned := t.watchedByID[id]; !owned {
+			t.watchedByID[id] = clean
+		}
+	}
+	if !exists {
+		t.adjustSubtreeCounts(clean, 1)
+	}
+}
+
+func (t *Trigger) deleteWatchedLocked(clean string) {
+	entry, exists := t.watched[clean]
+	if !exists {
 		return
 	}
 	delete(t.watched, clean)
+	if entry.hasID && t.watchedByID[entry.id] == clean {
+		delete(t.watchedByID, entry.id)
+	}
 	t.adjustSubtreeCounts(clean, -1)
 }
 
@@ -356,7 +412,7 @@ func (t *Trigger) removeWatchedBelow(lost string) {
 	}
 	for name := range t.watched {
 		if isWithin(name, lost) {
-			t.deleteWatched(name)
+			t.deleteWatchedLocked(name)
 			_ = t.watcher.Remove(name)
 		}
 	}
@@ -586,7 +642,7 @@ type pendingScan struct {
 // A queue holds filesystem paths until the processor accepts them.
 // Only the worker goroutine reads or writes scans.
 type queue struct {
-	callback autoscan.ProcessorFunc
+	callback func(context.Context, ...autoscan.Scan) error
 	log      zerolog.Logger
 	priority int
 	inputs   chan string
@@ -594,7 +650,7 @@ type queue struct {
 	scans    map[string]pendingScan
 }
 
-func newQueue(ctx context.Context, cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queue {
+func newQueue(ctx context.Context, cb func(context.Context, ...autoscan.Scan) error, log zerolog.Logger, priority int) *queue {
 	q := &queue{
 		callback: cb,
 		log:      log,
@@ -636,7 +692,7 @@ func (q *queue) worker(ctx context.Context) {
 			q.enqueue(path)
 
 		case <-ticker.C:
-			q.process()
+			q.process(ctx)
 		}
 	}
 }
@@ -665,9 +721,11 @@ func (q *queue) flush() {
 		})
 	}
 
-	deadline := time.Now().Add(flushRetryTimeout)
+	flushCtx, cancel := context.WithTimeout(context.Background(), flushRetryTimeout)
+	defer cancel()
+
 	for {
-		err := q.callback(scans...)
+		err := q.callback(flushCtx, scans...)
 		if err == nil {
 			clear(q.scans)
 			for _, scan := range scans {
@@ -677,32 +735,48 @@ func (q *queue) flush() {
 			}
 			return
 		}
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
+		if flushCtx.Err() != nil || !waitForRetry(flushCtx, flushRetryDelay) {
 			q.log.Error().
 				Err(err).
 				Int("count", len(scans)).
 				Msg("Failed flushing pending scans to processor during shutdown")
 			return
 		}
-		time.Sleep(min(flushRetryDelay, remaining))
 	}
 }
 
-func (q *queue) process() {
+func waitForRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (q *queue) process(ctx context.Context) {
 	for path, scan := range q.scans {
+		if ctx.Err() != nil {
+			return
+		}
 		now := time.Now()
 		if now.Before(scan.readyAt) {
 			continue
 		}
 
-		err := q.callback(autoscan.Scan{
+		err := q.callback(ctx, autoscan.Scan{
 			Folder:   filepath.Clean(path),
 			Priority: q.priority,
 			Time:     now,
 		})
 
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			scan.retryDelay = min(queueRetryMax, max(queueRetryMin, 2*scan.retryDelay))
 			scan.readyAt = time.Now().Add(scan.retryDelay)
 			q.scans[path] = scan
