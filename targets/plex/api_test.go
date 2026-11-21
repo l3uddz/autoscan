@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -90,6 +91,7 @@ func TestScanReportsFolderInNoLibrary(t *testing.T) {
 }
 
 func TestScanDeduplicatesNestedLocationsInSameLibrary(t *testing.T) {
+	var mu sync.Mutex
 	var refreshed []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -98,7 +100,9 @@ func TestScanDeduplicatesNestedLocationsInSameLibrary(t *testing.T) {
 		case "/library/sections":
 			w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"5","title":"TV","Location":[{"path":"/mnt/tv"},{"path":"/mnt/tv/anime"}]}]}}`))
 		default:
+			mu.Lock()
 			refreshed = append(refreshed, r.URL.Path)
+			mu.Unlock()
 		}
 	}))
 	defer srv.Close()
@@ -111,7 +115,10 @@ func TestScanDeduplicatesNestedLocationsInSameLibrary(t *testing.T) {
 	if err := target.Scan(t.Context(), autoscan.Scan{Folder: "/mnt/tv/anime/Show"}); err != nil {
 		t.Fatalf("Scan returned %v", err)
 	}
-	if want := []string{"/library/sections/5/refresh"}; !reflect.DeepEqual(refreshed, want) {
-		t.Errorf("refreshed %v, want %v", refreshed, want)
+	mu.Lock()
+	got := append([]string(nil), refreshed...)
+	mu.Unlock()
+	if want := []string{"/library/sections/5/refresh"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("refreshed %v, want %v", got, want)
 	}
 }
