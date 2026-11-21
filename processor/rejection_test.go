@@ -55,6 +55,21 @@ func TestRejectedScanIsSetAside(t *testing.T) {
 	})
 }
 
+func TestSetAsideScanKeepsLastError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{onScan: func(autoscan.Scan) error { return errors.New("400 Bad Request") }}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "bad")
+		defer startProcessor(t, proc)()
+
+		// Wait past the set-aside and the next idle poll of the empty queue.
+		time.Sleep(retriesUntilSetAside + pollInterval + time.Second)
+		synctest.Wait()
+		assertAttempts(t, target, maxScanAttempts)
+		assertTargetStatus(t, proc, "server", 0, "400 Bad Request", time.Time{})
+	})
+}
+
 func TestTargetThatRejectsEveryScanSetsAsideOnlyOne(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failure := errors.New("403 Forbidden")

@@ -77,10 +77,15 @@ func (store *datastore) recordFailure(target string, delay time.Duration, next t
 	return err
 }
 
-const sqlClearRetry = `UPDATE scan_target SET retry_delay = 0, next_retry = 0, last_error = '' WHERE id = ? AND retry_delay > 0`
+// sqlResetRetry ends the retry delay of a target. It keeps the last error,
+// so /status shows it until a scan reaches the target.
+const sqlResetRetry = `UPDATE scan_target SET retry_delay = 0, next_retry = 0 WHERE id = ? AND retry_delay > 0`
+
+// sqlClearRetry ends the retry delay and clears the last error of a target.
+const sqlClearRetry = `UPDATE scan_target SET retry_delay = 0, next_retry = 0, last_error = '' WHERE id = ?`
 
 func (store *datastore) clearIdleRetry(target string) error {
-	_, err := store.db.Exec(sqlClearRetry+`
+	_, err := store.db.Exec(sqlResetRetry+`
 		AND NOT EXISTS (SELECT 1 FROM scan_delivery WHERE target = scan_target.id)
 	`, target)
 	return err
@@ -96,7 +101,21 @@ type deliveryResult struct {
 	scans int64
 }
 
+// completeDelivery removes the delivery of scan to target after the target
+// received it, and clears the retry state of the target.
 func (store *datastore) completeDelivery(target string, scan queuedScan) (deliveryResult, error) {
+	return store.removeDelivery(target, scan, sqlClearRetry)
+}
+
+// setAsideDelivery removes the delivery of scan to target after the target
+// kept rejecting it. It ends the retry delay and keeps the last error.
+func (store *datastore) setAsideDelivery(target string, scan queuedScan) (deliveryResult, error) {
+	return store.removeDelivery(target, scan, sqlResetRetry)
+}
+
+// removeDelivery removes the delivery of scan to target, removes the scan if
+// no target needs it, and runs retrySQL for target.
+func (store *datastore) removeDelivery(target string, scan queuedScan, retrySQL string) (deliveryResult, error) {
 	tx, err := store.db.Begin()
 	if err != nil {
 		return deliveryResult{}, err
@@ -117,7 +136,7 @@ func (store *datastore) completeDelivery(target string, scan queuedScan) (delive
 	if err != nil {
 		return deliveryResult{}, err
 	}
-	if _, err := tx.Exec(sqlClearRetry, target); err != nil {
+	if _, err := tx.Exec(retrySQL, target); err != nil {
 		return deliveryResult{}, err
 	}
 	removed, err := delivery.RowsAffected()

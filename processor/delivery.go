@@ -135,7 +135,7 @@ func (target *targetWorker) rejects(scan queuedScan, err error) bool {
 // the folder arrived during the delivery, the delivery stays for the new
 // revision, and the worker can still set aside a scan.
 func (p *Processor) setScanAside(target *targetWorker, scan queuedScan, failure error) (time.Duration, error) {
-	result, err := p.store.completeDelivery(target.ID, scan)
+	result, err := p.store.setAsideDelivery(target.ID, scan)
 	if err != nil {
 		return 0, errors.Join(failure, err)
 	}
