@@ -721,11 +721,13 @@ func (q *queue) flush() {
 		})
 	}
 
-	flushCtx, cancel := context.WithTimeout(context.Background(), flushRetryTimeout)
+	deadline := time.Now().Add(flushRetryTimeout)
+	flushCtx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 
-	for {
-		err := q.callback(flushCtx, scans...)
+	var err error
+	for flushCtx.Err() == nil && time.Now().Before(deadline) {
+		err = q.callback(flushCtx, scans...)
 		if err == nil {
 			clear(q.scans)
 			for _, scan := range scans {
@@ -735,17 +737,20 @@ func (q *queue) flush() {
 			}
 			return
 		}
-		if flushCtx.Err() != nil || !waitForRetry(flushCtx, flushRetryDelay) {
-			q.log.Error().
-				Err(err).
-				Int("count", len(scans)).
-				Msg("Failed flushing pending scans to processor during shutdown")
-			return
+		if !waitForRetry(flushCtx, flushRetryDelay) {
+			break
 		}
 	}
+	q.log.Error().
+		Err(err).
+		Int("count", len(scans)).
+		Msg("Failed flushing pending scans to processor during shutdown")
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
@@ -753,7 +758,7 @@ func waitForRetry(ctx context.Context, delay time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	case <-timer.C:
-		return true
+		return ctx.Err() == nil
 	}
 }
 

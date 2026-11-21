@@ -214,21 +214,25 @@ func TestQueueFlushRetriesTransientErrorOnStop(t *testing.T) {
 
 func TestQueueFlushStopsRetryingAfterBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		var start time.Time
 		var attempts int
-		q := newQueue(t.Context(), func(context.Context, ...autoscan.Scan) error {
+		q := newQueue(t.Context(), func(cbCtx context.Context, _ ...autoscan.Scan) error {
 			attempts++
+			if cbCtx.Err() != nil || !time.Now().Before(start.Add(flushRetryTimeout)) {
+				t.Errorf("attempt %d started at/after expiry: elapsed=%v ctxErr=%v", attempts, time.Since(start), cbCtx.Err())
+			}
 			return errors.New("datastore unavailable")
 		}, zerolog.Nop(), 3)
 
 		q.inputs <- "/mnt/media/show/"
 		synctest.Wait()
 
-		start := time.Now()
+		start = time.Now()
 		q.stop()
 		elapsed := time.Since(start)
 
-		if attempts < 2 {
-			t.Errorf("flush attempts = %d, want retries within budget", attempts)
+		if want := int(flushRetryTimeout / flushRetryDelay); attempts != want {
+			t.Errorf("flush attempts = %d, want %d", attempts, want)
 		}
 		if elapsed != flushRetryTimeout {
 			t.Errorf("flush duration = %v, want %v", elapsed, flushRetryTimeout)
