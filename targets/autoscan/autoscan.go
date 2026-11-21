@@ -2,6 +2,7 @@ package autoscan
 
 import (
 	"context"
+	"errors"
 
 	"github.com/rs/zerolog"
 
@@ -15,6 +16,17 @@ type Config struct {
 	Pass      string             `yaml:"password"`
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Verbosity string             `yaml:"verbosity"`
+}
+
+// BaseURL returns the configured URL of the other autoscan.
+func (c Config) BaseURL() string {
+	return c.URL
+}
+
+// Validate returns an error for each value of c that cannot work.
+func (c Config) Validate() error {
+	_, rewriteErr := autoscan.NewRewriter(c.Rewrite)
+	return errors.Join(httpapi.CheckBaseURL(c.URL), rewriteErr)
 }
 
 type target struct {

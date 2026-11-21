@@ -3,6 +3,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -19,6 +20,18 @@ type Config struct {
 	Token     string             `yaml:"token"`
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Verbosity string             `yaml:"verbosity"`
+}
+
+// BaseURL returns the configured server URL.
+func (c Config) BaseURL() string {
+	return c.URL
+}
+
+// Validate returns an error for each value of c that cannot work. An empty
+// token is allowed, because Plex can allow a network without one.
+func (c Config) Validate() error {
+	_, rewriteErr := autoscan.NewRewriter(c.Rewrite)
+	return errors.Join(httpapi.CheckBaseURL(c.URL), httpapi.CheckToken(c.Token), rewriteErr)
 }
 
 // A Library is one folder of a media server library.

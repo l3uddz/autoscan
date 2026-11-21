@@ -53,3 +53,15 @@ func TestScanDoesNotLogURLPassword(t *testing.T) {
 		t.Errorf("log output contains the URL password: %s", out)
 	}
 }
+
+func TestConfigValidate(t *testing.T) {
+	if err := (Config{URL: "http://autoscan:3030"}).Validate(); err != nil {
+		t.Errorf("Validate() = %v for a valid configuration", err)
+	}
+	if err := (Config{URL: "autoscan:3030"}).Validate(); err == nil {
+		t.Error("Validate() = nil for a URL without a scheme")
+	}
+	if err := (Config{URL: "http://autoscan:3030", Rewrite: []autoscan.Rewrite{{From: "("}}}).Validate(); err == nil {
+		t.Error("Validate() = nil for an invalid rewrite")
+	}
+}

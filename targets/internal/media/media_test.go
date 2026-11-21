@@ -145,3 +145,25 @@ func TestPathTargetScan(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigValidate(t *testing.T) {
+	var testCases = map[string]struct {
+		Config  Config
+		WantErr bool
+	}{
+		"Valid":               {Config{URL: "http://plex:32400", Token: "token"}, false},
+		"No token":            {Config{URL: "http://plex:32400"}, false},
+		"URL without scheme":  {Config{URL: "plex:32400", Token: "token"}, true},
+		"Invalid rewrite":     {Config{URL: "http://plex:32400", Rewrite: []autoscan.Rewrite{{From: "(", To: ""}}}, true},
+		"Token with quote":    {Config{URL: "http://plex:32400", Token: `to"ken`}, true},
+		"Token with new line": {Config{URL: "http://plex:32400", Token: "token\n"}, true},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			if err := tc.Config.Validate(); (err != nil) != tc.WantErr {
+				t.Errorf("Validate() = %v, want error %v", err, tc.WantErr)
+			}
+		})
+	}
+}

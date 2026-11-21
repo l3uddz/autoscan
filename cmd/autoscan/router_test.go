@@ -20,6 +20,7 @@ import (
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/migrate"
 	"github.com/l3uddz/autoscan/processor"
+	"github.com/l3uddz/autoscan/targets/plex"
 	"github.com/l3uddz/autoscan/triggers/inotify"
 	"github.com/l3uddz/autoscan/triggers/lidarr"
 	"github.com/l3uddz/autoscan/triggers/radarr"
@@ -156,14 +157,15 @@ func TestStatusReportsPendingRetryAndSharedAnchor(t *testing.T) {
 		}
 		const retryURL = "http://private-user:private-password@retry.example/private-path?token=private-token"
 		failUntil := time.Now().Add(15 * time.Second)
-		targets := newTargets("plex", []string{"http://healthy.example", retryURL}, func(address string) string {
-			return address
-		}, func(_ context.Context, address string) (autoscan.Target, error) {
+		targets, err := newTargets("plex", []statusTestConfig{"http://healthy.example", retryURL}, func(_ context.Context, address statusTestConfig) (autoscan.Target, error) {
 			if address == retryURL && time.Now().Before(failUntil) {
 				return nil, fmt.Errorf("GET %s: %w", address, autoscan.ErrTargetUnavailable)
 			}
 			return statusTestTarget{}, nil
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
 		proc, _ := newRouterTestProcessor(t, processor.Config{Anchors: []string{anchor}, Targets: targets})
 		if err := proc.Add(
 			autoscan.Scan{Folder: "/private/oldest", Time: time.Now().Add(-time.Minute)},
@@ -232,6 +234,12 @@ func TestStatusReportsInotifyPathsWithoutNames(t *testing.T) {
 	}
 }
 
+// statusTestConfig is a target configuration that is its URL.
+type statusTestConfig string
+
+func (c statusTestConfig) BaseURL() string { return string(c) }
+func (statusTestConfig) Validate() error   { return nil }
+
 type statusTestTarget struct{}
 
 func (statusTestTarget) Available(context.Context) error           { return nil }
@@ -271,4 +279,11 @@ func requestProcessorStatus(t *testing.T, router http.Handler, wantCode int) sta
 		t.Fatal(err)
 	}
 	return status
+}
+
+func TestNewTargetsRejectsInvalidConfiguration(t *testing.T) {
+	_, err := newTargets("plex", []plex.Config{{URL: "http://plex:32400"}, {URL: "plex:32400"}}, plex.New)
+	if err == nil || !strings.Contains(err.Error(), "plex-2") {
+		t.Errorf("newTargets returned %v, want an error for plex-2", err)
+	}
 }

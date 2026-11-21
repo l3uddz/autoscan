@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -86,6 +87,23 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	}
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	return nil
+}
+
+// CheckBaseURL returns the error that New returns for the base URL raw.
+// The configuration checks it at startup.
+func CheckBaseURL(raw string) error {
+	_, err := parseBaseURL(raw)
+	return err
+}
+
+// CheckToken returns an error if token contains a quote or a control
+// character. Such a token breaks the header that carries it, so the server
+// rejects every request.
+func CheckToken(token string) error {
+	if strings.ContainsFunc(token, func(r rune) bool { return r < ' ' || r == 0x7f || r == '"' }) {
+		return errors.New("token contains a quote or a control character")
 	}
 	return nil
 }

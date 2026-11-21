@@ -167,12 +167,16 @@ func main() {
 	}
 
 	// targets
-	targets := slices.Concat(
-		newTargets("autoscan", c.Targets.Autoscan, func(t ast.Config) string { return t.URL }, ast.New),
-		newTargets("plex", c.Targets.Plex, func(t plex.Config) string { return t.URL }, plex.New),
-		newTargets("emby", c.Targets.Emby, func(t emby.Config) string { return t.URL }, emby.New),
-		newTargets("jellyfin", c.Targets.Jellyfin, func(t jellyfin.Config) string { return t.URL }, jellyfin.New),
-	)
+	autoscanTargets, autoscanErr := newTargets("autoscan", c.Targets.Autoscan, ast.New)
+	plexTargets, plexErr := newTargets("plex", c.Targets.Plex, plex.New)
+	embyTargets, embyErr := newTargets("emby", c.Targets.Emby, emby.New)
+	jellyfinTargets, jellyfinErr := newTargets("jellyfin", c.Targets.Jellyfin, jellyfin.New)
+	if err := errors.Join(autoscanErr, plexErr, embyErr, jellyfinErr); err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Failed checking targets")
+	}
+	targets := slices.Concat(autoscanTargets, plexTargets, embyTargets, jellyfinTargets)
 
 	// processor
 	proc, err := processor.New(processor.Config{
@@ -375,11 +379,33 @@ func logConfigured(c config) {
 		Msg("Configured targets")
 }
 
-func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(context.Context, C) (autoscan.Target, error)) []processor.Target {
+// targetConfig is the configuration of one target.
+type targetConfig interface {
+	// BaseURL returns the configured URL. The target ID uses it.
+	BaseURL() string
+
+	// Validate returns an error for a value that cannot work.
+	Validate() error
+}
+
+// newTargets returns a processor target for each configuration in configs.
+// It checks every configuration first, so that a bad value stops autoscan
+// at startup instead of failing each connection.
+func newTargets[C targetConfig](kind string, configs []C, open func(context.Context, C) (autoscan.Target, error)) ([]processor.Target, error) {
+	var errs []error
+	for i, cfg := range configs {
+		if err := cfg.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("%s-%d: %w", kind, i+1, err))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+
 	targets := make([]processor.Target, 0, len(configs))
 	occurrences := make(map[string]int)
 	for i, cfg := range configs {
-		address := rawURL(cfg)
+		address := cfg.BaseURL()
 		occurrences[address]++
 		// The URL can contain credentials. Only include its host and a digest
 		// in the ID, and distinguish repeated entries for the same address.
@@ -396,5 +422,5 @@ func newTargets[C any](kind string, configs []C, rawURL func(C) string, open fun
 			},
 		})
 	}
-	return targets
+	return targets, nil
 }
