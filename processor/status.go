@@ -112,6 +112,7 @@ func (store *datastore) queueStatus(ctx context.Context) ([]TargetStatus, *time.
 
 func oldestPendingScan(ctx context.Context, tx *sql.Tx) (*time.Time, error) {
 	// The datastore stores scan times in UTC, so the text order is time order.
+	// The scan_time index gives the oldest row without a sort.
 	var oldest time.Time
 	err := tx.QueryRowContext(ctx, `SELECT time FROM scan ORDER BY time LIMIT 1`).Scan(&oldest)
 	if errors.Is(err, sql.ErrNoRows) {
