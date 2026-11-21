@@ -24,7 +24,7 @@ func TestScanRefreshesLibraryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.Scan("/mnt/tv/Show", 5); err != nil {
+	if err := api.Scan(t.Context(), "/mnt/tv/Show", 5); err != nil {
 		t.Fatalf("Scan returned %v", err)
 	}
 
@@ -46,12 +46,12 @@ func TestNewReadsVersionAndLibraries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := New(Config{URL: srv.URL, Token: "token"})
+	got, err := New(t.Context(), Config{URL: srv.URL, Token: "token"})
 	if err != nil {
 		t.Fatalf("New returned %v", err)
 	}
 
-	libs, err := got.(*target).libraries.Matching("/mnt/tv/Show")
+	libs, err := got.(*target).libraries.Matching(t.Context(), "/mnt/tv/Show")
 	if err != nil {
 		t.Fatalf("Matching returned %v", err)
 	}
@@ -74,12 +74,12 @@ func TestScanReportsFolderInNoLibrary(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	target, err := New(Config{URL: srv.URL, Token: "token"})
+	target, err := New(t.Context(), Config{URL: srv.URL, Token: "token"})
 	if err != nil {
 		t.Fatalf("New returned %v", err)
 	}
 
-	if err := target.Scan(autoscan.Scan{Folder: "/mnt/movies/Film"}); !errors.Is(err, autoscan.ErrNoLibrary) {
+	if err := target.Scan(t.Context(), autoscan.Scan{Folder: "/mnt/movies/Film"}); !errors.Is(err, autoscan.ErrNoLibrary) {
 		t.Errorf("Scan returned %v, want %v", err, autoscan.ErrNoLibrary)
 	}
 	if refreshed {

@@ -1,6 +1,8 @@
 package emby
 
 import (
+	"context"
+
 	"github.com/l3uddz/autoscan"
 	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 	"github.com/l3uddz/autoscan/targets/internal/media"
@@ -13,7 +15,7 @@ type Config struct {
 	Verbosity string             `yaml:"verbosity"`
 }
 
-func New(c Config) (autoscan.Target, error) {
+func New(ctx context.Context, c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "emby").
 		Str("url", httpapi.RedactURL(c.URL)).
@@ -29,7 +31,7 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, err
 	}
 
-	libraries, err := media.NewLibraryList(l, api.Libraries)
+	libraries, err := media.NewLibraryList(ctx, l, api.Libraries)
 	if err != nil {
 		return nil, err
 	}

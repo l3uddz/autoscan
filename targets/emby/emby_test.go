@@ -21,7 +21,7 @@ func TestNewDoesNotLogURLPassword(t *testing.T) {
 	defer func() { log.Logger = orig }()
 
 	proxyURL := strings.Replace(srv.URL, "http://", "http://user:secret@", 1)
-	if _, err := New(Config{URL: proxyURL, Token: "token", Verbosity: "trace"}); err == nil {
+	if _, err := New(t.Context(), Config{URL: proxyURL, Token: "token", Verbosity: "trace"}); err == nil {
 		t.Fatal("New() returned nil error for a 404 response")
 	}
 

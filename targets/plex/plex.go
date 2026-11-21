@@ -1,6 +1,7 @@
 package plex
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -27,7 +28,7 @@ type target struct {
 	api     apiClient
 }
 
-func New(c Config) (autoscan.Target, error) {
+func New(ctx context.Context, c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "plex").
 		Str("url", httpapi.RedactURL(c.URL)).Logger()
@@ -42,7 +43,7 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, err
 	}
 
-	version, err := api.Version()
+	version, err := api.Version(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +53,7 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, fmt.Errorf("plex running unsupported version %s", version)
 	}
 
-	libraries, err := media.NewLibraryList(l, api.Libraries)
+	libraries, err := media.NewLibraryList(ctx, l, api.Libraries)
 	if err != nil {
 		return nil, err
 	}
@@ -66,16 +67,16 @@ func New(c Config) (autoscan.Target, error) {
 	}, nil
 }
 
-func (t *target) Available() error {
-	_, err := t.api.Version()
+func (t *target) Available(ctx context.Context) error {
+	_, err := t.api.Version(ctx)
 	return err
 }
 
-func (t *target) Scan(scan autoscan.Scan) error {
+func (t *target) Scan(ctx context.Context, scan autoscan.Scan) error {
 	// determine library for this scan
 	scanFolder := t.rewrite(scan.Folder)
 
-	libs, err := t.libraries.Matching(scanFolder)
+	libs, err := t.libraries.Matching(ctx, scanFolder)
 	if err != nil {
 		return err
 	}
@@ -92,7 +93,7 @@ func (t *target) Scan(scan autoscan.Scan) error {
 
 		l.Trace().Msg("Sending scan request")
 
-		if err := t.api.Scan(scanFolder, lib.ID); err != nil {
+		if err := t.api.Scan(ctx, scanFolder, lib.ID); err != nil {
 			return err
 		}
 

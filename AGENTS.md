@@ -61,7 +61,10 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
   `cmd/autoscan/main.go`.
 - If you add a target, add a package under `targets/`. Register it in
   `cmd/autoscan/main.go`. Send its HTTP requests with the client in
-  `targets/internal/httpapi`.
+  `targets/internal/httpapi`. The target implements `autoscan.Target`. Pass
+  the context of `Scan` and `Available` to each request, because it ends
+  when autoscan stops. If a scan folder is in no library of the target,
+  return `autoscan.ErrNoLibrary`.
 - Build URLs with `net/url`, not by joining strings. `httpapi.New` parses
   and checks the base URL once. Pass the request path as path elements, and
   pass the query as `url.Values`. `JoinPath` does not escape an element and

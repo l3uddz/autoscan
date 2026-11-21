@@ -17,7 +17,7 @@ import (
 func TestStatusReadyAfterReconnectWithYoungScans(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var failed atomic.Bool
-		target := Target{ID: "plex", Open: func() (autoscan.Target, error) {
+		target := Target{ID: "plex", Open: func(context.Context) (autoscan.Target, error) {
 			if failed.CompareAndSwap(false, true) {
 				return nil, errors.New("offline")
 			}

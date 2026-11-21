@@ -24,7 +24,7 @@ func TestRequestsUseAuthorizationHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.Available(); err != nil {
+	if err := api.Available(t.Context()); err != nil {
 		t.Fatalf("Available() returned error: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func TestRequestsBehindBasicAuthProxyUseApiKeyQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.Available(); err != nil {
+	if err := api.Available(t.Context()); err != nil {
 		t.Fatalf("Available() returned error: %v", err)
 	}
 
@@ -76,7 +76,7 @@ func TestConnectionErrorDoesNotLeakToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = api.Available()
+	err = api.Available(t.Context())
 	if err == nil {
 		t.Fatal("Available() returned nil error for a closed server")
 	}

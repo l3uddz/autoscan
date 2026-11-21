@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -79,7 +80,7 @@ func TestSendUpdated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SendUpdated(c, nil, "/mnt/tv/Show", "Modified"); err != nil {
+	if err := SendUpdated(t.Context(), c, nil, "/mnt/tv/Show", "Modified"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,9 +98,9 @@ type fakeAPI struct {
 	paths []string
 }
 
-func (f *fakeAPI) Available() error { return f.err }
+func (f *fakeAPI) Available(context.Context) error { return f.err }
 
-func (f *fakeAPI) Scan(path string) error {
+func (f *fakeAPI) Scan(_ context.Context, path string) error {
 	f.paths = append(f.paths, path)
 	return f.err
 }
@@ -128,13 +129,13 @@ func TestPathTargetScan(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			api := &fakeAPI{err: tc.APIErr}
-			list, err := NewLibraryList(zerolog.Nop(), func() ([]Library, error) { return libraries, nil })
+			list, err := NewLibraryList(t.Context(), zerolog.Nop(), func(context.Context) ([]Library, error) { return libraries, nil })
 			if err != nil {
 				t.Fatal(err)
 			}
 			target := NewPathTarget(zerolog.Nop(), rewrite, list, api)
 
-			err = target.Scan(autoscan.Scan{Folder: tc.Folder})
+			err = target.Scan(t.Context(), autoscan.Scan{Folder: tc.Folder})
 			if !errors.Is(err, tc.WantErr) || (err == nil) != (tc.WantErr == nil) {
 				t.Errorf("Scan returned %v, want %v", err, tc.WantErr)
 			}

@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -41,21 +42,21 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, 
 	return apiClient{http: client}, err
 }
 
-func (c apiClient) Available() error {
-	if err := c.http.Send(http.MethodGet, nil, "System", "Info"); err != nil {
+func (c apiClient) Available(ctx context.Context) error {
+	if err := c.http.Send(ctx, http.MethodGet, nil, "System", "Info"); err != nil {
 		return fmt.Errorf("availability: %w", err)
 	}
 
 	return nil
 }
 
-func (c apiClient) Libraries() ([]media.Library, error) {
+func (c apiClient) Libraries(ctx context.Context) ([]media.Library, error) {
 	var resp []struct {
 		Name      string   `json:"Name"`
 		Locations []string `json:"Locations"`
 	}
 
-	if err := c.http.GetJSON(&resp, "Library", "VirtualFolders"); err != nil {
+	if err := c.http.GetJSON(ctx, &resp, "Library", "VirtualFolders"); err != nil {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 
@@ -69,8 +70,8 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 	return libraries, nil
 }
 
-func (c apiClient) Scan(path string) error {
-	if err := media.SendUpdated(c.http, nil, path, "Modified"); err != nil {
+func (c apiClient) Scan(ctx context.Context, path string) error {
+	if err := media.SendUpdated(ctx, c.http, nil, path, "Modified"); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 

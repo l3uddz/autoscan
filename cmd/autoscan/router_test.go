@@ -158,7 +158,7 @@ func TestStatusReportsPendingRetryAndSharedAnchor(t *testing.T) {
 		failUntil := time.Now().Add(15 * time.Second)
 		targets := newTargets("plex", []string{"http://healthy.example", retryURL}, func(address string) string {
 			return address
-		}, func(address string) (autoscan.Target, error) {
+		}, func(_ context.Context, address string) (autoscan.Target, error) {
 			if address == retryURL && time.Now().Before(failUntil) {
 				return nil, fmt.Errorf("GET %s: %w", address, autoscan.ErrTargetUnavailable)
 			}
@@ -234,8 +234,8 @@ func TestStatusReportsInotifyPathsWithoutNames(t *testing.T) {
 
 type statusTestTarget struct{}
 
-func (statusTestTarget) Available() error         { return nil }
-func (statusTestTarget) Scan(autoscan.Scan) error { return nil }
+func (statusTestTarget) Available(context.Context) error           { return nil }
+func (statusTestTarget) Scan(context.Context, autoscan.Scan) error { return nil }
 
 type statusResponse struct {
 	CanDeliver bool     `json:"can_deliver"`

@@ -29,7 +29,7 @@ type Config struct {
 type Target struct {
 	ID          string
 	StatusLabel string
-	Open        func() (autoscan.Target, error)
+	Open        func(ctx context.Context) (autoscan.Target, error)
 }
 
 // TargetStatus reports persisted delivery and retry state for a target.

@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,9 +117,9 @@ func parseBaseURL(raw string) (*url.URL, error) {
 
 // Send sends a request without a body and closes the response body.
 // elem are the path elements after the base URL. If query is not nil, it
-// is the query of the request URL.
-func (c *Client) Send(method string, query url.Values, elem ...string) error {
-	req, err := c.newRequest(method, query, nil, elem)
+// is the query of the request URL. ctx ends the request.
+func (c *Client) Send(ctx context.Context, method string, query url.Values, elem ...string) error {
+	req, err := c.newRequest(ctx, method, query, nil, elem)
 	if err != nil {
 		return err
 	}
@@ -135,13 +136,13 @@ func (c *Client) Send(method string, query url.Values, elem ...string) error {
 
 // PostJSON sends v as the JSON body of a POST request and closes the
 // response body.
-func (c *Client) PostJSON(v any, elem ...string) error {
+func (c *Client) PostJSON(ctx context.Context, v any, elem ...string) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("encoding request body: %w", err)
 	}
 
-	req, err := c.newRequest(http.MethodPost, nil, bytes.NewReader(b), elem)
+	req, err := c.newRequest(ctx, http.MethodPost, nil, bytes.NewReader(b), elem)
 	if err != nil {
 		return err
 	}
@@ -157,8 +158,8 @@ func (c *Client) PostJSON(v any, elem ...string) error {
 }
 
 // GetJSON sends a GET request and decodes the JSON response body into v.
-func (c *Client) GetJSON(v any, elem ...string) error {
-	req, err := c.newRequest(http.MethodGet, nil, nil, elem)
+func (c *Client) GetJSON(ctx context.Context, v any, elem ...string) error {
+	req, err := c.newRequest(ctx, http.MethodGet, nil, nil, elem)
 	if err != nil {
 		return err
 	}
@@ -179,11 +180,11 @@ func (c *Client) GetJSON(v any, elem ...string) error {
 // newRequest returns a request for the path elements elem after the base
 // URL. JoinPath returns a new URL, so Prepare can change the request URL
 // without changing the base URL.
-func (c *Client) newRequest(method string, query url.Values, body io.Reader, elem []string) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method string, query url.Values, body io.Reader, elem []string) (*http.Request, error) {
 	u := c.base.JoinPath(elem...)
 	u.RawQuery = query.Encode()
 
-	req, err := http.NewRequest(method, u.String(), body)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
 	}

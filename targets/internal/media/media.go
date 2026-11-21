@@ -2,6 +2,7 @@
 package media
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -62,7 +63,7 @@ func Names(libraries []Library) []string {
 // SendUpdated reports a changed path to Emby or Jellyfin with
 // POST Library/Media/Updated below prefix, the path elements of the API
 // root. The request names no library.
-func SendUpdated(c *httpapi.Client, prefix []string, path string, updateType string) error {
+func SendUpdated(ctx context.Context, c *httpapi.Client, prefix []string, path string, updateType string) error {
 	type update struct {
 		Path       string `json:"path"`
 		UpdateType string `json:"updateType"`
@@ -74,13 +75,13 @@ func SendUpdated(c *httpapi.Client, prefix []string, path string, updateType str
 		Updates: []update{{Path: path, UpdateType: updateType}},
 	}
 
-	return c.PostJSON(payload, slices.Concat(prefix, []string{"Library", "Media", "Updated"})...)
+	return c.PostJSON(ctx, payload, slices.Concat(prefix, []string{"Library", "Media", "Updated"})...)
 }
 
 // A PathAPI is a media server client whose scan request takes only a path.
 type PathAPI interface {
-	Available() error
-	Scan(path string) error
+	Available(ctx context.Context) error
+	Scan(ctx context.Context, path string) error
 }
 
 // PathTarget is the autoscan.Target for Emby and Jellyfin. Their scan request
@@ -99,16 +100,16 @@ func NewPathTarget(log zerolog.Logger, rewrite autoscan.Rewriter, libraries *Lib
 	return &PathTarget{log: log, rewrite: rewrite, libraries: libraries, api: api}
 }
 
-func (t *PathTarget) Available() error {
-	return t.api.Available()
+func (t *PathTarget) Available(ctx context.Context) error {
+	return t.api.Available(ctx)
 }
 
 // Scan sends the rewritten scan folder to the media server. If the folder
 // is in no library, Scan sends nothing and returns autoscan.ErrNoLibrary.
-func (t *PathTarget) Scan(scan autoscan.Scan) error {
+func (t *PathTarget) Scan(ctx context.Context, scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
-	libs, err := t.libraries.Matching(scanFolder)
+	libs, err := t.libraries.Matching(ctx, scanFolder)
 	if err != nil {
 		return err
 	}
@@ -123,7 +124,7 @@ func (t *PathTarget) Scan(scan autoscan.Scan) error {
 
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(scanFolder); err != nil {
+	if err := t.api.Scan(ctx, scanFolder); err != nil {
 		return err
 	}
 

@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -64,7 +65,7 @@ func TestFolderInNoLibraryIsSkipped(t *testing.T) {
 			}
 			return nil
 		}}
-		proc := testProcessorWithConfig(t, Config{Targets: []Target{{ID: "server", Open: func() (autoscan.Target, error) {
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{{ID: "server", Open: func(context.Context) (autoscan.Target, error) {
 			opens.Add(1)
 			return target, nil
 		}}}})

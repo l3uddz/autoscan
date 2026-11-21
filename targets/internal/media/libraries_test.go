@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -16,7 +17,7 @@ type fakeServer struct {
 	loads     int
 }
 
-func (s *fakeServer) load() ([]Library, error) {
+func (s *fakeServer) load(context.Context) ([]Library, error) {
 	s.loads++
 	return s.libraries, s.err
 }
@@ -25,7 +26,7 @@ func (s *fakeServer) load() ([]Library, error) {
 func newTestList(t *testing.T, server *fakeServer) (*LibraryList, *time.Time) {
 	t.Helper()
 	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	list, err := NewLibraryList(zerolog.Nop(), server.load)
+	list, err := NewLibraryList(t.Context(), zerolog.Nop(), server.load)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func newTestList(t *testing.T, server *fakeServer) (*LibraryList, *time.Time) {
 
 func matchNames(t *testing.T, list *LibraryList, folder string) []string {
 	t.Helper()
-	libs, err := list.Matching(folder)
+	libs, err := list.Matching(t.Context(), folder)
 	if err != nil {
 		t.Fatalf("Matching(%q) returned %v", folder, err)
 	}
@@ -100,14 +101,14 @@ func TestLibraryListReturnsReloadError(t *testing.T) {
 
 	server.err = errors.New("unavailable")
 	*clock = clock.Add(minReloadInterval)
-	if _, err := list.Matching("/mnt/movies/Film"); !errors.Is(err, server.err) {
+	if _, err := list.Matching(t.Context(), "/mnt/movies/Film"); !errors.Is(err, server.err) {
 		t.Errorf("Matching returned %v, want %v", err, server.err)
 	}
 
 	// A failed reload also starts the minimum interval. Until it ends, an
 	// unmatched folder gets the same error, so its scan stays queued.
 	*clock = clock.Add(time.Second)
-	if _, err := list.Matching("/mnt/other/Film"); !errors.Is(err, server.err) {
+	if _, err := list.Matching(t.Context(), "/mnt/other/Film"); !errors.Is(err, server.err) {
 		t.Errorf("Matching within the interval returned %v, want %v", err, server.err)
 	}
 	if server.loads != 2 {

@@ -30,16 +30,16 @@ func TestScanDoesNotLogURLPassword(t *testing.T) {
 	defer func() { log.Logger = orig }()
 
 	proxyURL := strings.Replace(srv.URL, "http://", "http://user:secret@", 1)
-	target, err := New(Config{URL: proxyURL, Verbosity: "trace"})
+	target, err := New(t.Context(), Config{URL: proxyURL, Verbosity: "trace"})
 	if err != nil {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
-	if err := target.Available(); err == nil {
+	if err := target.Available(t.Context()); err == nil {
 		t.Fatal("Available() returned nil error for a 404 response")
 	}
 	fail.Store(false)
-	if err := target.Scan(autoscan.Scan{Folder: "/mnt/tv/Show"}); err != nil {
+	if err := target.Scan(t.Context(), autoscan.Scan{Folder: "/mnt/tv/Show"}); err != nil {
 		t.Fatalf("Scan() returned error: %v", err)
 	}
 

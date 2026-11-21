@@ -34,22 +34,18 @@ type scanRevision struct {
 	revision string
 }
 
+// runTarget delivers the scans of target until ctx ends.
 func (p *Processor) runTarget(ctx context.Context, target *targetWorker) {
-	for ctx.Err() == nil {
+	for {
 		delay, err := p.deliver(ctx, target)
-		if ctx.Err() != nil {
-			return
-		}
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			log.Error().Err(err).Str("target", target.ID).Msg("Scan delivery paused")
 			delay = pollInterval
 		}
-		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
-		case <-timer.C:
+		case <-time.After(delay):
 		}
 	}
 }
@@ -63,19 +59,19 @@ func (p *Processor) deliver(ctx context.Context, target *targetWorker) (time.Dur
 		return wait, nil
 	}
 	if target.client == nil {
-		if err := target.connect(); err != nil {
-			return p.retryTarget(target, retry.delay, err)
+		if err := target.connect(ctx); err != nil {
+			return p.retryTarget(ctx, target, retry.delay, err)
 		}
 	}
 	return p.deliverScan(ctx, target, retry.delay)
 }
 
-func (target *targetWorker) connect() error {
-	client, err := target.Open()
+func (target *targetWorker) connect(ctx context.Context) error {
+	client, err := target.Open(ctx)
 	if err != nil {
 		return err
 	}
-	if err := client.Available(); err != nil {
+	if err := client.Available(ctx); err != nil {
 		return err
 	}
 	target.client = client
@@ -96,16 +92,21 @@ func (p *Processor) deliverScan(ctx context.Context, target *targetWorker, retry
 	if err := p.waitForAnchors(ctx); err != nil {
 		return 0, err
 	}
-	err = target.client.Scan(scan.Scan)
+	err = target.client.Scan(ctx, scan.Scan)
 	if errors.Is(err, autoscan.ErrNoLibrary) {
 		return p.skipScan(target, scan, err)
 	}
 	if err != nil {
 		target.client = nil
+		// A request that the shutdown stopped is no failure of the target.
+		// The scan stays queued for the next start.
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
 		if target.rejects(scan, err) {
 			return p.setScanAside(target, scan, err)
 		}
-		return p.retryTarget(target, retryDelay, err)
+		return p.retryTarget(ctx, target, retryDelay, err)
 	}
 	result, err := p.store.completeDelivery(target.ID, scan)
 	if err != nil {
@@ -169,7 +170,12 @@ func (p *Processor) setScanAside(target *targetWorker, scan queuedScan, failure 
 	return p.scanDelay, nil
 }
 
-func (p *Processor) retryTarget(target *targetWorker, previous time.Duration, failure error) (time.Duration, error) {
+// retryTarget records failure and the retry delay of target. If ctx ended,
+// the failure came from the shutdown, so it records nothing.
+func (p *Processor) retryTarget(ctx context.Context, target *targetWorker, previous time.Duration, failure error) (time.Duration, error) {
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
 	delay := min(time.Hour, max(15*time.Second, 2*previous))
 	if err := p.store.recordFailure(target.ID, delay, time.Now().Add(delay), failure.Error()); err != nil {
 		return 0, errors.Join(failure, err)

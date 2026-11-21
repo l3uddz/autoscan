@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,7 +28,7 @@ func TestTargetDeliveryRecoversAfterRestart(t *testing.T) {
 		startupErr := unavailable
 		targets := []Target{
 			connectedTarget("healthy", healthy),
-			{ID: "offline", Open: func() (autoscan.Target, error) {
+			{ID: "offline", Open: func(context.Context) (autoscan.Target, error) {
 				<-startup
 				return offline, startupErr
 			}},
@@ -291,7 +292,7 @@ func finishAnchorCheck(proc *Processor, hung *anchorProbe) {
 }
 
 func connectedTarget(id string, target autoscan.Target) Target {
-	return Target{ID: id, Open: func() (autoscan.Target, error) { return target, nil }}
+	return Target{ID: id, Open: func(context.Context) (autoscan.Target, error) { return target, nil }}
 }
 
 func assertDelivered(t *testing.T, target *fakeTarget, folders ...string) {
@@ -348,4 +349,31 @@ func processorWithDB(t *testing.T, db *sql.DB, cfg Config) *Processor {
 		t.Fatal(err)
 	}
 	return proc
+}
+
+func TestShutdownStopsScanWithoutRecordingFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &blockingTarget{}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "folder")
+		stop := startProcessor(t, proc)
+
+		// The worker waits in the scan request until the shutdown ends it.
+		stop()
+		assertTargetStatus(t, proc, "server", 1, "", time.Time{})
+		if remaining, err := proc.ScansRemaining(); err != nil || remaining != 1 {
+			t.Fatalf("ScansRemaining = %d, %v, want 1, nil", remaining, err)
+		}
+	})
+}
+
+// blockingTarget answers a scan request only when its context ends, like an
+// HTTP request to a server that does not answer.
+type blockingTarget struct{}
+
+func (blockingTarget) Available(context.Context) error { return nil }
+
+func (blockingTarget) Scan(ctx context.Context, _ autoscan.Scan) error {
+	<-ctx.Done()
+	return fmt.Errorf("%w: %w", ctx.Err(), autoscan.ErrTargetUnavailable)
 }

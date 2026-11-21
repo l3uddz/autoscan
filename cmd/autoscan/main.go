@@ -377,7 +377,7 @@ func logConfigured(c config) {
 		Msg("Configured targets")
 }
 
-func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(C) (autoscan.Target, error)) []processor.Target {
+func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(context.Context, C) (autoscan.Target, error)) []processor.Target {
 	targets := make([]processor.Target, 0, len(configs))
 	occurrences := make(map[string]int)
 	for i, cfg := range configs {
@@ -393,8 +393,8 @@ func newTargets[C any](kind string, configs []C, rawURL func(C) string, open fun
 		targets = append(targets, processor.Target{
 			ID:          id,
 			StatusLabel: fmt.Sprintf("%s-%d", kind, i+1),
-			Open: func() (autoscan.Target, error) {
-				return open(cfg)
+			Open: func(ctx context.Context) (autoscan.Target, error) {
+				return open(ctx, cfg)
 			},
 		})
 	}

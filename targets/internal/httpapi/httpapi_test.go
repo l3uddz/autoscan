@@ -194,7 +194,7 @@ func TestRequestTimeoutIsUnavailable(t *testing.T) {
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(done) })
 
-	if err := newTestClient(t, srv.URL).Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := newTestClient(t, srv.URL).Send(t.Context(), http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
@@ -211,7 +211,7 @@ func TestBodyTimeoutIsUnavailable(t *testing.T) {
 	t.Cleanup(func() { close(done) })
 
 	var v struct{}
-	if err := newTestClient(t, srv.URL).GetJSON(&v); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := newTestClient(t, srv.URL).GetJSON(t.Context(), &v); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
@@ -228,7 +228,7 @@ func TestSendBuildsRequest(t *testing.T) {
 		Log:     zerolog.Nop(),
 		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
 	})
-	if err := c.Send(http.MethodPost, url.Values{"path": {"/mnt/tv"}}, "library", "sections", "1", "refresh"); err != nil {
+	if err := c.Send(t.Context(), http.MethodPost, url.Values{"path": {"/mnt/tv"}}, "library", "sections", "1", "refresh"); err != nil {
 		t.Fatalf("Send returned %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestFailedRequestLogRemovesSecrets(t *testing.T) {
 		},
 		SecretParams: []string{"ApiKey"},
 	})
-	if err := c.Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := c.Send(t.Context(), http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Fatalf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 
@@ -305,7 +305,7 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			got = ""
 			c := mustNew(t, Config{BaseURL: tc.Base, Log: zerolog.Nop()})
-			if err := c.Send(http.MethodGet, nil, tc.Elem...); err != nil {
+			if err := c.Send(t.Context(), http.MethodGet, nil, tc.Elem...); err != nil {
 				t.Fatalf("Send returned %v", err)
 			}
 			if got != tc.Want {
@@ -354,7 +354,7 @@ func TestRequestDoesNotChangeBaseURL(t *testing.T) {
 			req.URL.RawQuery = q.Encode()
 		},
 	})
-	if err := c.Send(http.MethodGet, url.Values{"path": {"/mnt"}}, "library"); err != nil {
+	if err := c.Send(t.Context(), http.MethodGet, url.Values{"path": {"/mnt"}}, "library"); err != nil {
 		t.Fatalf("Send returned %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestRedirectToOtherMethodIsUnavailable(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()}).Send(http.MethodPost, nil, "old")
+	err := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()}).Send(t.Context(), http.MethodPost, nil, "old")
 	if !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
@@ -400,7 +400,7 @@ func TestRedirectToOtherHostIsUnavailable(t *testing.T) {
 		Log:     zerolog.Nop(),
 		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
 	})
-	if err := c.Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := c.Send(t.Context(), http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 	if leaked != "" {
@@ -424,7 +424,7 @@ func TestRedirectOnSameHostIsFollowed(t *testing.T) {
 		Log:     zerolog.Nop(),
 		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
 	})
-	if err := c.Send(http.MethodGet, nil, "old"); err != nil {
+	if err := c.Send(t.Context(), http.MethodGet, nil, "old"); err != nil {
 		t.Fatalf("Send returned %v", err)
 	}
 	if gotToken != "token" {
