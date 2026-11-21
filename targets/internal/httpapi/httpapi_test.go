@@ -290,6 +290,8 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 
 	userinfo := strings.Replace(srv.URL, "http://", "http://user:secret@", 1)
 	// Go dials the local system for an empty host, so a port-only URL works.
+	// The proxy environment does not exempt an empty host, so the test
+	// client uses a transport without a proxy.
 	portOnly := "http://" + srv.URL[strings.LastIndex(srv.URL, ":"):]
 	var testCases = []Test{
 		{"Root", srv.URL, []string{"/"}, "/"},
@@ -308,6 +310,7 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			got = ""
 			c := mustNew(t, Config{BaseURL: tc.Base, Log: zerolog.Nop()})
+			c.client.Transport = &http.Transport{}
 			if err := c.Send(t.Context(), http.MethodGet, nil, tc.Elem...); err != nil {
 				t.Fatalf("Send returned %v", err)
 			}
