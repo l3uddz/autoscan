@@ -60,7 +60,7 @@ func TestProcessKeepsScanEnqueuedDuringDispatch(t *testing.T) {
 				target.onScan = func(autoscan.Scan) error {
 					return proc.Add(followUp)
 				}
-				if _, err := proc.deliver(t.Context(), worker); err != nil {
+				if _, _, err := proc.deliver(t.Context(), worker); err != nil {
 					t.Fatalf("first delivery: %v", err)
 				}
 				if remaining, err := proc.ScansRemaining(); err != nil || remaining != 1 {
@@ -69,13 +69,13 @@ func TestProcessKeepsScanEnqueuedDuringDispatch(t *testing.T) {
 
 				target.onScan = nil
 				if tc.refreshTime {
-					if delay, err := proc.deliver(t.Context(), worker); err != nil || delay == 0 {
+					if delay, _, err := proc.deliver(t.Context(), worker); err != nil || delay == 0 {
 						t.Fatalf("delivery before minimum age: delay %v, err %v", delay, err)
 					}
 					assertDelivered(t, target, first.Folder)
 					time.Sleep(minimumAge + time.Second)
 				}
-				if _, err := proc.deliver(t.Context(), worker); err != nil {
+				if _, _, err := proc.deliver(t.Context(), worker); err != nil {
 					t.Fatalf("follow-up delivery: %v", err)
 				}
 				want := autoscan.Scan{Folder: first.Folder, Priority: first.Priority, Time: followUp.Time}

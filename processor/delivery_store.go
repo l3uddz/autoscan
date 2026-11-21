@@ -71,18 +71,18 @@ func (store *datastore) configureTargets(targets []Target) error {
 	return tx.Commit()
 }
 
-func (store *datastore) retry(target string) (retryState, error) {
+func (store *datastore) retry(ctx context.Context, target string) (retryState, error) {
 	var retry retryState
 	var next int64
-	err := store.db.QueryRow(`
+	err := store.db.QueryRowContext(ctx, `
 		SELECT retry_delay, next_retry FROM scan_target WHERE id = ?
 	`, target).Scan(&retry.delay, &next)
 	retry.next = retryTime(next)
 	return retry, err
 }
 
-func (store *datastore) recordFailure(target string, delay time.Duration, next time.Time, message string) error {
-	_, err := store.db.Exec(`
+func (store *datastore) recordFailure(ctx context.Context, target string, delay time.Duration, next time.Time, message string) error {
+	_, err := store.db.ExecContext(ctx, `
 		UPDATE scan_target SET retry_delay = ?, next_retry = ?, last_error = ? WHERE id = ?
 	`, delay, next.UnixNano(), message, target)
 	return err
@@ -97,8 +97,8 @@ const sqlClearRetry = `UPDATE scan_target SET retry_delay = 0, next_retry = 0, l
 
 // clearIdleRetry ends the retry delay of a target that has no deliveries.
 // It keeps the last error.
-func (store *datastore) clearIdleRetry(target string) error {
-	_, err := store.db.Exec(`
+func (store *datastore) clearIdleRetry(ctx context.Context, target string) error {
+	_, err := store.db.ExecContext(ctx, `
 		UPDATE scan_target SET retry_delay = 0, next_retry = 0
 		WHERE id = ? AND retry_delay > 0
 		AND NOT EXISTS (SELECT 1 FROM scan_delivery WHERE target = scan_target.id)
@@ -130,7 +130,8 @@ func (store *datastore) dropDelivery(target string, scan queuedScan) (deliveryRe
 }
 
 // removeDelivery removes the delivery of scan to target, removes the scan if
-// no target needs it, and runs retrySQL for target.
+// no target needs it, and runs retrySQL for target. It intentionally omits
+// the shutdown context so a delivery the target already accepted still commits.
 func (store *datastore) removeDelivery(target string, scan queuedScan, retrySQL string) (deliveryResult, error) {
 	tx, err := store.db.Begin()
 	if err != nil {

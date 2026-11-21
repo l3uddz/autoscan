@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -148,8 +149,8 @@ ORDER BY priority DESC, time ASC
 LIMIT 1
 `
 
-func (store *datastore) GetAvailableScan(target string, olderThan time.Time) (queuedScan, error) {
-	row := store.db.QueryRow(sqlGetAvailableScan, target, olderThan.UTC())
+func (store *datastore) GetAvailableScan(ctx context.Context, target string, olderThan time.Time) (queuedScan, error) {
+	row := store.db.QueryRowContext(ctx, sqlGetAvailableScan, target, olderThan.UTC())
 
 	var scan queuedScan
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time, &scan.revision)

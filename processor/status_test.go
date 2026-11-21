@@ -47,7 +47,7 @@ func TestStatusStopsWaitingForHungAnchorCheck(t *testing.T) {
 		}
 		proc := testProcessorWithConfig(t, Config{Anchors: []string{anchor}, Targets: []Target{connectedTarget("plex", &fakeTarget{})}})
 		retryAt := time.Now().Add(time.Second)
-		if err := proc.store.recordFailure("plex", 15*time.Second, retryAt, "offline"); err != nil {
+		if err := proc.store.recordFailure(t.Context(), "plex", 15*time.Second, retryAt, "offline"); err != nil {
 			t.Fatal(err)
 		}
 		hung := hangAnchorCheck(proc)

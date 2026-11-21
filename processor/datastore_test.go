@@ -196,7 +196,7 @@ func TestGetAvailableScan(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			scan, err := store.GetAvailableScan("target", tc.Now.Add(-tc.MinAge))
+			scan, err := store.GetAvailableScan(t.Context(), "target", tc.Now.Add(-tc.MinAge))
 			if !errors.Is(err, tc.WantErr) {
 				t.Fatal(err)
 			}
@@ -238,7 +238,7 @@ func TestCompleteDelivery(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			scan, err := store.GetAvailableScan("target", time.Now())
+			scan, err := store.GetAvailableScan(t.Context(), "target", time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -296,14 +296,14 @@ func TestScanRevisionMigrationKeepsPendingScans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scan, err := store.GetAvailableScan("target", time.Now())
+	scan, err := store.GetAvailableScan(t.Context(), "target", time.Now())
 	if err != nil || scan.Scan != first {
 		t.Fatalf("first scan after upgrade = %+v, %v, want %+v, nil", scan.Scan, err, first)
 	}
 	if _, err := store.completeDelivery("target", scan); err != nil {
 		t.Fatal(err)
 	}
-	otherTargetScan, err := store.GetAvailableScan("other target", time.Now())
+	otherTargetScan, err := store.GetAvailableScan(t.Context(), "other target", time.Now())
 	if err != nil || otherTargetScan.Scan != first {
 		t.Fatalf("other target's first scan after upgrade = %+v, %v, want %+v, nil", otherTargetScan.Scan, err, first)
 	}
@@ -331,7 +331,7 @@ func TestQueuedScansSurviveAStartupWithoutTargets(t *testing.T) {
 	if err := store.configureTargets([]Target{{ID: "new target"}}); err != nil {
 		t.Fatal(err)
 	}
-	queued, err := store.GetAvailableScan("new target", time.Now())
+	queued, err := store.GetAvailableScan(t.Context(), "new target", time.Now())
 	if err != nil || queued.Scan != scan {
 		t.Fatalf("new target's pending scan = %+v, %v, want %+v, nil", queued.Scan, err, scan)
 	}
@@ -391,7 +391,7 @@ func TestGetAvailableScanComparesTimesAcrossOffsets(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			scan, err := store.GetAvailableScan("target", tc.OlderThan)
+			scan, err := store.GetAvailableScan(t.Context(), "target", tc.OlderThan)
 			if tc.WantFolder == "" {
 				if !errors.Is(err, errNoScans) {
 					t.Fatalf("available scan = %+v, %v, want %v", scan.Scan, err, errNoScans)
@@ -451,7 +451,7 @@ func TestStartupStoresEarlierScanTimesInUTC(t *testing.T) {
 
 	var delivered []string
 	for {
-		scan, err := store.GetAvailableScan("target", time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC))
+		scan, err := store.GetAvailableScan(t.Context(), "target", time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC))
 		if errors.Is(err, errNoScans) {
 			break
 		}
