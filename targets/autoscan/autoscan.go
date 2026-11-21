@@ -31,10 +31,15 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, err
 	}
 
+	api, err := newAPIClient(c.URL, c.User, c.Pass, l)
+	if err != nil {
+		return nil, err
+	}
+
 	return &target{
 		log:     l,
 		rewrite: rewriter,
-		api:     newAPIClient(c.URL, c.User, c.Pass, l),
+		api:     api,
 	}, nil
 }
 

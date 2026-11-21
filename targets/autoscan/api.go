@@ -10,15 +10,15 @@ import (
 	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 )
 
-// manualTrigger is the endpoint of the manual trigger of the other autoscan.
-const manualTrigger = "triggers/manual"
+// manualTrigger is the path of the manual trigger of the other autoscan.
+var manualTrigger = []string{"triggers", "manual"}
 
 type apiClient struct {
 	http *httpapi.Client
 }
 
-func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) apiClient {
-	return apiClient{http: httpapi.New(httpapi.Config{
+func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) (apiClient, error) {
+	client, err := httpapi.New(httpapi.Config{
 		BaseURL: baseURL,
 		Log:     log,
 		Prepare: func(req *http.Request) {
@@ -27,11 +27,12 @@ func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) 
 			}
 		},
 		AuthMessage: "invalid basic auth",
-	})}
+	})
+	return apiClient{http: client}, err
 }
 
 func (c apiClient) Available() error {
-	if err := c.http.Send(http.MethodHead, manualTrigger, nil); err != nil {
+	if err := c.http.Send(http.MethodHead, nil, manualTrigger...); err != nil {
 		return fmt.Errorf("availability: %w", err)
 	}
 
@@ -39,7 +40,7 @@ func (c apiClient) Available() error {
 }
 
 func (c apiClient) Scan(path string) error {
-	if err := c.http.Send(http.MethodPost, manualTrigger, url.Values{"dir": {path}}); err != nil {
+	if err := c.http.Send(http.MethodPost, url.Values{"dir": {path}}, manualTrigger...); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 

@@ -50,7 +50,10 @@ func TestSendUpdated(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := httpapi.New(httpapi.Config{BaseURL: srv.URL + "/", Log: zerolog.Nop()})
+	c, err := httpapi.New(httpapi.Config{BaseURL: srv.URL + "/", Log: zerolog.Nop()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := SendUpdated(c, "/mnt/tv/Show", "Modified"); err != nil {
 		t.Fatal(err)
 	}

@@ -14,8 +14,8 @@ type apiClient struct {
 	http *httpapi.Client
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
-	return apiClient{http: httpapi.New(httpapi.Config{
+func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, error) {
+	client, err := httpapi.New(httpapi.Config{
 		BaseURL: baseURL,
 		Log:     log,
 		Prepare: func(req *http.Request) {
@@ -23,11 +23,12 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 			req.Header.Set("Accept", "application/json") // Force JSON Response.
 		},
 		AuthMessage: "invalid emby token",
-	})}
+	})
+	return apiClient{http: client}, err
 }
 
 func (c apiClient) Available() error {
-	if err := c.http.Send(http.MethodGet, "emby/System/Info", nil); err != nil {
+	if err := c.http.Send(http.MethodGet, nil, "emby", "System", "Info"); err != nil {
 		return fmt.Errorf("availability: %w", err)
 	}
 
@@ -42,7 +43,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 		} `json:"SubFolders"`
 	}
 
-	if err := c.http.GetJSON("emby/Library/SelectableMediaFolders", &resp); err != nil {
+	if err := c.http.GetJSON(&resp, "emby", "Library", "SelectableMediaFolders"); err != nil {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 

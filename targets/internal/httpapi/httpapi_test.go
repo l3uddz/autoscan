@@ -162,15 +162,25 @@ func (c *closeRecorder) Close() error {
 	return nil
 }
 
+// mustNew returns a Client for c and fails the test if New fails.
+func mustNew(t *testing.T, c Config) *Client {
+	t.Helper()
+	client, err := New(c)
+	if err != nil {
+		t.Fatalf("New returned %v", err)
+	}
+	return client
+}
+
 // newTestClient returns a Client for url with a short timeout.
-func newTestClient(url string) *Client {
-	c := New(Config{BaseURL: url, Log: zerolog.Nop()})
+func newTestClient(t *testing.T, url string) *Client {
+	c := mustNew(t, Config{BaseURL: url, Log: zerolog.Nop()})
 	c.client.Timeout = 50 * time.Millisecond
 	return c
 }
 
 func TestNewUsesTargetTimeout(t *testing.T) {
-	if got := New(Config{}).client.Timeout; got != timeout {
+	if got := mustNew(t, Config{BaseURL: "http://example.invalid"}).client.Timeout; got != timeout {
 		t.Fatalf("HTTP client timeout = %v, want %v", got, timeout)
 	}
 }
@@ -184,7 +194,7 @@ func TestRequestTimeoutIsUnavailable(t *testing.T) {
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(done) })
 
-	if err := newTestClient(srv.URL).Send(http.MethodGet, "", nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := newTestClient(t, srv.URL).Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
@@ -201,7 +211,7 @@ func TestBodyTimeoutIsUnavailable(t *testing.T) {
 	t.Cleanup(func() { close(done) })
 
 	var v struct{}
-	if err := newTestClient(srv.URL).GetJSON("", &v); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := newTestClient(t, srv.URL).GetJSON(&v); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
@@ -213,12 +223,12 @@ func TestSendBuildsRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(Config{
+	c := mustNew(t, Config{
 		BaseURL: srv.URL + "/base/",
 		Log:     zerolog.Nop(),
 		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
 	})
-	if err := c.Send(http.MethodPost, "library/sections/1/refresh", url.Values{"path": {"/mnt/tv"}}); err != nil {
+	if err := c.Send(http.MethodPost, url.Values{"path": {"/mnt/tv"}}, "library", "sections", "1", "refresh"); err != nil {
 		t.Fatalf("Send returned %v", err)
 	}
 
@@ -238,7 +248,7 @@ func TestFailedRequestLogRemovesSecrets(t *testing.T) {
 	defer srv.Close()
 
 	var buf strings.Builder
-	c := New(Config{
+	c := mustNew(t, Config{
 		BaseURL: strings.Replace(srv.URL, "http://", "http://user:secret@", 1),
 		Log:     zerolog.New(&buf).Level(zerolog.TraceLevel),
 		Prepare: func(req *http.Request) {
@@ -248,7 +258,7 @@ func TestFailedRequestLogRemovesSecrets(t *testing.T) {
 		},
 		SecretParams: []string{"ApiKey"},
 	})
-	if err := c.Send(http.MethodGet, "", nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := c.Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Fatalf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 
@@ -269,35 +279,83 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 	defer srv.Close()
 
 	type Test struct {
-		Name     string
-		Base     string
-		Endpoint string
-		Want     string
+		Name string
+		Base string
+		Elem []string
+		Want string
 	}
 
 	userinfo := strings.Replace(srv.URL, "http://", "http://user:secret@", 1)
 	var testCases = []Test{
-		{"Root", srv.URL, "", "/"},
-		{"Root with slash", srv.URL + "/", "", "/"},
-		{"Root with prefix", srv.URL + "/plex", "", "/plex/"},
-		{"Root with prefix and slash", srv.URL + "/plex/", "", "/plex/"},
-		{"Endpoint", srv.URL, "library/sections", "/library/sections"},
-		{"Endpoint with slash", srv.URL + "/", "library/sections", "/library/sections"},
-		{"Endpoint with prefix", srv.URL + "/plex", "library/sections/1/refresh", "/plex/library/sections/1/refresh"},
-		{"Endpoint with prefix and slash", srv.URL + "/plex/", "emby/System/Info", "/plex/emby/System/Info"},
-		{"Endpoint with userinfo", userinfo, "triggers/manual", "/triggers/manual"},
+		{"Root", srv.URL, []string{"/"}, "/"},
+		{"Root with slash", srv.URL + "/", []string{"/"}, "/"},
+		{"Root with prefix", srv.URL + "/plex", []string{"/"}, "/plex/"},
+		{"Root with prefix and slash", srv.URL + "/plex/", []string{"/"}, "/plex/"},
+		{"Endpoint", srv.URL, []string{"library", "sections"}, "/library/sections"},
+		{"Endpoint with slash", srv.URL + "/", []string{"library", "sections"}, "/library/sections"},
+		{"Endpoint with prefix", srv.URL + "/plex", []string{"library", "sections", "1", "refresh"}, "/plex/library/sections/1/refresh"},
+		{"Endpoint with prefix and slash", srv.URL + "/plex/", []string{"emby", "System", "Info"}, "/plex/emby/System/Info"},
+		{"Endpoint with userinfo", userinfo, []string{"triggers", "manual"}, "/triggers/manual"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			got = ""
-			c := New(Config{BaseURL: tc.Base, Log: zerolog.Nop()})
-			if err := c.Send(http.MethodGet, tc.Endpoint, nil); err != nil {
+			c := mustNew(t, Config{BaseURL: tc.Base, Log: zerolog.Nop()})
+			if err := c.Send(http.MethodGet, nil, tc.Elem...); err != nil {
 				t.Fatalf("Send returned %v", err)
 			}
 			if got != tc.Want {
 				t.Errorf("request path = %q, want %q", got, tc.Want)
 			}
 		})
+	}
+}
+
+func TestNewRejectsBaseURL(t *testing.T) {
+	var testCases = map[string]string{
+		"Query":        "http://user:secret@plex.invalid:32400?X-Plex-Token=token",
+		"Empty query":  "http://user:secret@plex.invalid:32400/?",
+		"Fragment":     "http://user:secret@plex.invalid:32400#secret",
+		"No scheme":    "plex.invalid:32400",
+		"Other scheme": "ftp://user:secret@plex.invalid",
+		"No host":      "http://",
+		"Opaque":       "http:plex.invalid:32400",
+		"Invalid":      "http://user:secret@plex.invalid:port",
+		"Empty":        "",
+	}
+
+	for name, raw := range testCases {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(Config{BaseURL: raw})
+			if err == nil {
+				t.Fatal("New returned nil error")
+			}
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "token") {
+				t.Errorf("error %q contains a credential", err)
+			}
+		})
+	}
+}
+
+func TestRequestDoesNotChangeBaseURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: srv.URL + "/plex",
+		Log:     zerolog.Nop(),
+		Prepare: func(req *http.Request) {
+			q := req.URL.Query()
+			q.Set("ApiKey", "token")
+			req.URL.RawQuery = q.Encode()
+		},
+	})
+	if err := c.Send(http.MethodGet, url.Values{"path": {"/mnt"}}, "library"); err != nil {
+		t.Fatalf("Send returned %v", err)
+	}
+
+	if got, want := c.base.String(), srv.URL+"/plex"; got != want {
+		t.Errorf("base URL = %q after a request, want %q", got, want)
 	}
 }

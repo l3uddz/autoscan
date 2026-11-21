@@ -20,7 +20,10 @@ func TestRequestsUseAuthorizationHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	api := newAPIClient(srv.URL, token, zerolog.Nop())
+	api, err := newAPIClient(srv.URL, token, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := api.Available(); err != nil {
 		t.Fatalf("Available() returned error: %v", err)
 	}
@@ -46,7 +49,10 @@ func TestRequestsBehindBasicAuthProxyUseApiKeyQuery(t *testing.T) {
 	defer srv.Close()
 
 	proxyURL := strings.Replace(srv.URL, "http://", "http://user:pass@", 1)
-	api := newAPIClient(proxyURL, token, zerolog.Nop())
+	api, err := newAPIClient(proxyURL, token, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := api.Available(); err != nil {
 		t.Fatalf("Available() returned error: %v", err)
 	}
@@ -66,8 +72,11 @@ func TestConnectionErrorDoesNotLeakToken(t *testing.T) {
 	proxyURL := strings.Replace(srv.URL, "http://", "http://user:pass@", 1)
 	srv.Close()
 
-	api := newAPIClient(proxyURL, token, zerolog.Nop())
-	err := api.Available()
+	api, err := newAPIClient(proxyURL, token, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = api.Available()
 	if err == nil {
 		t.Fatal("Available() returned nil error for a closed server")
 	}
