@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,5 +222,28 @@ func TestHandler(t *testing.T) {
 				t.Errorf("Status codes do not match: %d vs %d", res.StatusCode, tc.Expected.StatusCode)
 			}
 		})
+	}
+}
+
+func TestRenameWithEmptyRelativePathScansSeriesPath(t *testing.T) {
+	var got []string
+	handler, err := New(Config{Name: "sonarr"}, func(scans ...autoscan.Scan) error {
+		for _, scan := range scans {
+			got = append(got, scan.Folder)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const payload = `{"eventType":"Rename","series":{"path":"/tv/Show"},"renamedEpisodeFiles":[{"relativePath":""}]}`
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if want := []string{"/tv/Show"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("scanned folders = %v, want %v", got, want)
 	}
 }

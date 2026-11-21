@@ -244,6 +244,26 @@ func absolutePath(p string) bool {
 	return windowsPath(p) && len(p) > 2 && (p[2] == '\\' || p[2] == '/')
 }
 
+// CleanFolder cleans a Unix or Windows folder path while keeping its
+// separator style and preserving Windows drive roots and UNC prefixes.
+func CleanFolder(dir string) string {
+	if !windowsPath(dir) {
+		return path.Clean(dir)
+	}
+	if strings.HasPrefix(dir, `\\`) {
+		cleaned := path.Clean("/" + strings.ReplaceAll(dir[2:], `\`, "/"))
+		return `\` + strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	if len(dir) == 2 || (dir[2] != '/' && dir[2] != '\\') {
+		return dir
+	}
+	cleaned := path.Clean(strings.ReplaceAll(dir[2:], `\`, "/"))
+	if dir[2] == '\\' {
+		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	return dir[:2] + cleaned
+}
+
 // ParentFolder returns the folder of the file at the absolute path file.
 // It cleans a Unix path, as path.Dir does. A root folder, such as "/" or
 // "C:\", keeps its separator. ParentFolder returns "" for a path without a
@@ -260,6 +280,8 @@ func ParentFolder(file string) string {
 	switch {
 	case i < 0:
 		return ""
+	case strings.HasPrefix(file, `\\`) && i <= 1:
+		return ""
 	case i == 2 && file[1] == ':':
 		return file[:i+1]
 	default:
@@ -268,15 +290,23 @@ func ParentFolder(file string) string {
 }
 
 // FileFolder returns the folder of the file at relative, a path below the
-// folder base. A Windows base joins relative with its own separator.
+// folder base. An empty relative path returns the cleaned base folder.
+// A Windows base joins relative with its own separator.
 func FileFolder(base string, relative string) string {
 	if !windowsPath(base) {
+		if strings.TrimLeft(relative, "/") == "" {
+			return CleanFolder(base)
+		}
 		return path.Dir(path.Join(base, relative))
 	}
 
 	separator := "/"
 	if strings.Contains(base, `\`) {
 		separator = `\`
+	}
+	relative = strings.TrimLeft(relative, `/\`)
+	if relative == "" {
+		return CleanFolder(base)
 	}
 	return ParentFolder(strings.TrimRight(base, `/\`) + separator + relative)
 }

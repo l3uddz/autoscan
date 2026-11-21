@@ -302,6 +302,28 @@ func TestFileEvent(t *testing.T) {
 	}
 }
 
+func TestCleanFolder(t *testing.T) {
+	for dir, want := range map[string]string{
+		"/Movies/Show/":              "/Movies/Show",
+		"/":                          "/",
+		"tv/Show/":                   "tv/Show",
+		"C:/":                        "C:/",
+		"C:/TV/Show/":                "C:/TV/Show",
+		`C:\`:                        `C:\`,
+		`C:\TV\Show\`:                `C:\TV\Show`,
+		`C:\TV\..\Movies`:            `C:\Movies`,
+		"C:":                         "C:",
+		`C:TV\Show`:                  `C:TV\Show`,
+		`\\server\media\Show\`:       `\\server\media\Show`,
+		`\\server\media\`:            `\\server\media`,
+		`\\server\media\..\tv\Show\`: `\\server\tv\Show`,
+	} {
+		if got := CleanFolder(dir); got != want {
+			t.Errorf("CleanFolder(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
 func TestParentFolder(t *testing.T) {
 	for file, want := range map[string]string{
 		"/TV/Show/Season 1/episode.mkv":   "/TV/Show/Season 1",
@@ -314,6 +336,8 @@ func TestParentFolder(t *testing.T) {
 		`C:\episode.mkv`:                  `C:\`,
 		"C:/episode.mkv":                  "C:/",
 		`\\server\media\Show\episode.mkv`: `\\server\media\Show`,
+		`\\episode.mkv`:                   "",
+		`\\`:                              "",
 		"episode.mkv":                     "",
 		"C:episode.mkv":                   "",
 		"":                                "",
@@ -330,9 +354,13 @@ func TestFileFolder(t *testing.T) {
 	}{
 		{"/TV/Show", "Season 1/episode.mkv", "/TV/Show/Season 1"},
 		{"/TV/Show/", "episode.mkv", "/TV/Show"},
+		{"/TV/Show", "", "/TV/Show"},
+		{"/TV/Show/", "/", "/TV/Show"},
 		{"/TV/Show", `Season 1/a\b.mkv`, "/TV/Show/Season 1"},
 		{`C:\TV\Show`, `Season 1\episode.mkv`, `C:\TV\Show\Season 1`},
+		{`C:\TV\Show`, `\Season 1\episode.mkv`, `C:\TV\Show\Season 1`},
 		{`C:\TV\Show\`, "episode.mkv", `C:\TV\Show`},
+		{`C:\TV\Show\`, "", `C:\TV\Show`},
 		{`C:\`, `Show\episode.mkv`, `C:\Show`},
 		{"C:/TV/Show", "Season 1/episode.mkv", "C:/TV/Show/Season 1"},
 		{`\\server\media\Show`, `Season 1\episode.mkv`, `\\server\media\Show\Season 1`},
