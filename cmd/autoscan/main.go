@@ -134,45 +134,51 @@ func main() {
 	applyDefaultPaths(&cli.Config, &cli.Database, &cli.Log)
 	log.Logger = newLogger(cli.Log, cli.Verbosity)
 
+	if err := run(version); err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Failed running autoscan")
+	}
+	log.Info().Msg("Stopped")
+}
+
+// run starts autoscan with the paths in cli and runs it until a stop
+// signal arrives. It returns an error if autoscan cannot start.
+func run(version string) error {
 	// datastore
 	db, err := openDatabase(context.Background(), cli.Database)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed opening datastore")
+		return fmt.Errorf("open datastore: %w", err)
 	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed closing datastore")
+		}
+	}()
 
 	// config
 	file, err := waitForConfig(cli.Config, 5*time.Second)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed opening config")
+		return fmt.Errorf("open config: %w", err)
 	}
 	defer file.Close()
 
 	c, err := decodeConfig(file)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed decoding config")
+		return fmt.Errorf("decode config: %w", err)
 	}
 	warnings, err := validateConfig(c)
 	for _, warning := range warnings {
 		log.Warn().Msg(warning)
 	}
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed checking config")
+		return fmt.Errorf("check config: %w", err)
 	}
 
 	// migrator
 	mg, err := migrate.New(db, "migrations")
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising migrator")
+		return fmt.Errorf("initialise migrator: %w", err)
 	}
 
 	// targets
@@ -181,9 +187,7 @@ func main() {
 	embyTargets, embyErr := newTargets("emby", c.Targets.Emby, emby.New)
 	jellyfinTargets, jellyfinErr := newTargets("jellyfin", c.Targets.Jellyfin, jellyfin.New)
 	if err := errors.Join(autoscanErr, plexErr, embyErr, jellyfinErr); err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed checking targets")
+		return fmt.Errorf("check targets: %w", err)
 	}
 	targets := slices.Concat(autoscanTargets, plexTargets, embyTargets, jellyfinTargets)
 
@@ -196,11 +200,8 @@ func main() {
 		DB:         db,
 		Migrator:   mg,
 	})
-
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising processor")
+		return fmt.Errorf("initialise processor: %w", err)
 	}
 
 	log.Info().
@@ -223,10 +224,7 @@ func main() {
 	for _, t := range c.Triggers.Inotify {
 		watcher, err := inotify.New(t, proc.Add)
 		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("trigger", "inotify").
-				Msg("Failed initialising trigger")
+			return fmt.Errorf("initialise inotify trigger: %w", err)
 		}
 
 		watchers = append(watchers, watcher)
@@ -236,16 +234,12 @@ func main() {
 	// http triggers
 	router, err := getRouter(c, proc, watchers)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising trigger")
+		return fmt.Errorf("initialise trigger: %w", err)
 	}
 
 	servers, err := startServers(c.Host, c.Port, router, stop)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed starting web server")
+		return fmt.Errorf("start web server: %w", err)
 	}
 	logConfigured(c)
 
@@ -277,11 +271,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	shutdown(shutdownCtx, servers, processorDone)
-
-	if err := db.Close(); err != nil {
-		log.Error().Err(err).Msg("Failed closing datastore")
-	}
-	log.Info().Msg("Stopped")
+	return nil
 }
 
 // shutdown stops all servers at the same time, so no server accepts new
