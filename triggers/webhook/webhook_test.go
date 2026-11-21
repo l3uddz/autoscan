@@ -304,19 +304,22 @@ func TestFileEvent(t *testing.T) {
 
 func TestCleanFolder(t *testing.T) {
 	for dir, want := range map[string]string{
-		"/Movies/Show/":              "/Movies/Show",
-		"/":                          "/",
-		"tv/Show/":                   "tv/Show",
-		"C:/":                        "C:/",
-		"C:/TV/Show/":                "C:/TV/Show",
-		`C:\`:                        `C:\`,
-		`C:\TV\Show\`:                `C:\TV\Show`,
-		`C:\TV\..\Movies`:            `C:\Movies`,
-		"C:":                         "C:",
-		`C:TV\Show`:                  `C:TV\Show`,
-		`\\server\media\Show\`:       `\\server\media\Show`,
-		`\\server\media\`:            `\\server\media`,
-		`\\server\media\..\tv\Show\`: `\\server\tv\Show`,
+		"/Movies/Show/":                 "/Movies/Show",
+		"/":                             "/",
+		"tv/Show/":                      "tv/Show",
+		"C:/":                           "C:/",
+		"C:/TV/Show/":                   "C:/TV/Show",
+		`C:\`:                           `C:\`,
+		`C:\TV\Show\`:                   `C:\TV\Show`,
+		`C:\TV\..\Movies`:               `C:\Movies`,
+		"C:":                            "C:",
+		`C:TV\Show`:                     `C:TV\Show`,
+		`\\server\media\Show\`:          `\\server\media\Show`,
+		`\\server\media\`:               `\\server\media`,
+		`\\server\media`:                `\\server\media`,
+		`\\server\media\..\tv\Show\`:    `\\server\media\tv\Show`,
+		`\\server\media\Show\..\Other\`: `\\server\media\Other`,
+		`\\server\media\Show\..`:        `\\server\media`,
 	} {
 		if got := CleanFolder(dir); got != want {
 			t.Errorf("CleanFolder(%q) = %q, want %q", dir, got, want)

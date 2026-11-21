@@ -245,14 +245,13 @@ func absolutePath(p string) bool {
 }
 
 // CleanFolder cleans a Unix or Windows folder path while keeping its
-// separator style and preserving Windows drive roots and UNC prefixes.
+// separator style and preserving Windows drive roots and UNC server/share roots.
 func CleanFolder(dir string) string {
 	if !windowsPath(dir) {
 		return path.Clean(dir)
 	}
 	if strings.HasPrefix(dir, `\\`) {
-		cleaned := path.Clean("/" + strings.ReplaceAll(dir[2:], `\`, "/"))
-		return `\` + strings.ReplaceAll(cleaned, "/", `\`)
+		return cleanUNC(dir)
 	}
 	if len(dir) == 2 || (dir[2] != '/' && dir[2] != '\\') {
 		return dir
@@ -262,6 +261,29 @@ func CleanFolder(dir string) string {
 		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
 	}
 	return dir[:2] + cleaned
+}
+
+// cleanUNC cleans the path suffix below a \\server\share UNC volume root so
+// ".." cannot escape the share.
+func cleanUNC(dir string) string {
+	rest := strings.ReplaceAll(dir[2:], `\`, "/")
+	server, afterServer, hasShare := strings.Cut(rest, "/")
+	if server == "" || !hasShare {
+		return dir
+	}
+	share, suffix, hasSuffix := strings.Cut(afterServer, "/")
+	if share == "" {
+		return dir
+	}
+	root := `\\` + server + `\` + share
+	if !hasSuffix || suffix == "" {
+		return root
+	}
+	cleaned := path.Clean("/" + suffix)
+	if cleaned == "/" {
+		return root
+	}
+	return root + strings.ReplaceAll(cleaned, "/", `\`)
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.
