@@ -5,6 +5,7 @@ package inotify
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -88,12 +89,12 @@ func New(c Config, callback autoscan.ProcessorFunc) (*Trigger, error) {
 		if p.Path == "" {
 			return nil, errEmptyPath
 		}
-		rewriter, err := autoscan.NewRewriter(append(p.Rewrite, c.Rewrite...))
+		rewriter, err := autoscan.NewRewriter(slices.Concat(p.Rewrite, c.Rewrite))
 		if err != nil {
 			return nil, err
 		}
 
-		filterer, err := autoscan.NewFilterer(append(p.Include, c.Include...), append(p.Exclude, c.Exclude...))
+		filterer, err := autoscan.NewFilterer(slices.Concat(p.Include, c.Include), slices.Concat(p.Exclude, c.Exclude))
 		if err != nil {
 			return nil, err
 		}
@@ -212,8 +213,8 @@ func retry(log zerolog.Logger, msg string, path string, try func() error) {
 // the user raises the limit.
 func (t *Trigger) watchTree(root string) (bool, error) {
 	hasFile := false
-	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
-		if err == nil && !fi.IsDir() {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
 			if path == root {
 				return fmt.Errorf("%v: not a directory", path)
 			}
@@ -227,7 +228,7 @@ func (t *Trigger) watchTree(root string) (bool, error) {
 		if err == nil {
 			return nil
 		}
-		return t.walkError(root, path, fi, err)
+		return t.walkError(root, path, d, err)
 	})
 
 	return hasFile, err
@@ -248,7 +249,7 @@ func (t *Trigger) watchDir(path string) error {
 // walkError returns what the walk of watchTree does after err at path. It
 // fails the walk at root and at the inotify watch limit. Below root, it logs
 // a warning and skips the entry.
-func (t *Trigger) walkError(root, path string, fi os.FileInfo, err error) error {
+func (t *Trigger) walkError(root, path string, d fs.DirEntry, err error) error {
 	if errors.Is(err, syscall.ENOSPC) {
 		return fmt.Errorf("%v: %w: the inotify watch limit is too low, raise fs.inotify.max_user_watches", path, err)
 	}
@@ -260,7 +261,7 @@ func (t *Trigger) walkError(root, path string, fi os.FileInfo, err error) error 
 		Err(err).
 		Str("path", path).
 		Msg("Skipped directory")
-	if fi != nil && fi.IsDir() {
+	if d != nil && d.IsDir() {
 		return filepath.SkipDir
 	}
 	return nil
@@ -305,14 +306,20 @@ func (t *Trigger) worker() {
 	// process events
 	for {
 		select {
-		case event := <-t.watcher.Events:
+		case event, ok := <-t.watcher.Events:
+			if !ok {
+				return
+			}
 			t.rewatchLostRoot(event)
 			if name, ok := t.scanPath(event); ok {
 				// move to queue
 				t.queue.inputs <- name
 			}
 
-		case err := <-t.watcher.Errors:
+		case err, ok := <-t.watcher.Errors:
+			if !ok {
+				return
+			}
 			t.log.Error().
 				Err(err).
 				Msg("Failed receiving filesystem events")
@@ -320,26 +327,17 @@ func (t *Trigger) worker() {
 	}
 }
 
-// rewatchLostRoot handles the removal or rename of a watched root, or of a
-// directory above one. The root then has no watch, so the trigger marks it as
-// not watched and tries again to watch it, until the path exists again.
+// rewatchLostRoot releases watches below a removed or renamed path, and
+// restarts watching any configured root that was lost.
 func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
 	if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 		return
 	}
 
-	// The lost directory can be a root or a directory above a root. A
-	// rename of a directory moves its whole tree, but the kernel sends no
-	// event for the roots below it.
+	// After a rename, Linux keeps the subdirectory watches on the moved
+	// inodes under their old paths. Remove them for any renamed or removed
+	// path so moved trees get fresh watches and do not leak.
 	lost := filepath.Clean(event.Name)
-	if !slices.ContainsFunc(t.paths, func(p *path) bool { return isWithin(filepath.Clean(p.Path), lost) }) {
-		return
-	}
-
-	// After a rename, the subdirectories keep their own watches, on the
-	// moved tree. Remove them, so that the next walk of the path does not
-	// add a second watch for each directory. The kernel already removed the
-	// watches of a deleted tree, so errors do not matter.
 	for _, name := range t.watcher.WatchList() {
 		if isWithin(name, lost) {
 			_ = t.watcher.Remove(name)
@@ -373,38 +371,16 @@ func (t *Trigger) scanPath(event fsnotify.Event) (string, bool) {
 		Interface("event", event).
 		Msg("Filesystem event")
 
-	isDir := false
-
+	isDir, isFile := false, false
 	switch {
-	case event.Op&fsnotify.Create == fsnotify.Create:
-		// create
-		fi, err := os.Stat(event.Name)
-		if err != nil {
-			t.log.Error().
-				Err(err).
-				Str("path", event.Name).
-				Msg("Failed retrieving filesystem info")
+	case event.Has(fsnotify.Create):
+		var ok bool
+		isDir, isFile, ok = t.handleCreate(event.Name)
+		if !ok {
 			return "", false
 		}
 
-		// watch new directories and scan them only if they contain a file
-		if fi.IsDir() {
-			hasFile, err := t.watchTree(event.Name)
-			if err != nil {
-				t.log.Error().
-					Err(err).
-					Str("path", event.Name).
-					Msg("Failed watching new directory")
-			}
-
-			if !hasFile {
-				return "", false
-			}
-
-			isDir = true
-		}
-
-	case event.Op&fsnotify.Rename == fsnotify.Rename, event.Op&fsnotify.Remove == fsnotify.Remove:
+	case event.Has(fsnotify.Rename), event.Has(fsnotify.Remove):
 		// renamed / removed
 	default:
 		// ignore this event
@@ -429,13 +405,43 @@ func (t *Trigger) scanPath(event fsnotify.Event) (string, bool) {
 		return "", false
 	}
 
-	// get directory where path has an extension
-	if !isDir && filepath.Ext(rewritten) != "" {
-		// there was most likely a file extension, use the directory
+	// Use the parent directory for a known file or for a removed/renamed
+	// path that looks like a file with an extension.
+	if isFile || (!isDir && filepath.Ext(rewritten) != "") {
 		rewritten = filepath.Dir(rewritten)
 	}
 
 	return rewritten, true
+}
+
+func (t *Trigger) handleCreate(name string) (isDir bool, isFile bool, ok bool) {
+	fi, err := os.Stat(name)
+	if err != nil {
+		t.log.Error().
+			Err(err).
+			Str("path", name).
+			Msg("Failed retrieving filesystem info")
+		return false, false, false
+	}
+
+	if !fi.IsDir() {
+		return false, true, true
+	}
+
+	// watch new directories and scan them only if they contain a file
+	hasFile, err := t.watchTree(name)
+	if err != nil {
+		t.log.Error().
+			Err(err).
+			Str("path", name).
+			Msg("Failed watching new directory")
+	}
+
+	if !hasFile {
+		return false, false, false
+	}
+
+	return true, false, true
 }
 
 const (

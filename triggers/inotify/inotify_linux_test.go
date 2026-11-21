@@ -60,6 +60,7 @@ func receiveScans(t *testing.T, d *Trigger) []string {
 	for {
 		select {
 		case event := <-d.watcher.Events:
+			d.rewatchLostRoot(event)
 			if name, ok := d.scanPath(event); ok {
 				scans = append(scans, name)
 			}
@@ -313,5 +314,54 @@ func TestRenamedAncestorLosesNestedRoot(t *testing.T) {
 		if isWithin(name, filepath.Join(media, "tv")) {
 			t.Errorf("Watch %q below the moved directory remains", name)
 		}
+	}
+}
+
+func TestRenamedSubdirectoryKeepsWatchingNewPath(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	mkdirAll(t, filepath.Join(show, "Season 1"))
+	d := newWatchingDaemon(t, root)
+
+	renamed := filepath.Join(root, "Show (2024)")
+	rename(t, show, renamed)
+	_ = receiveScans(t, d)
+
+	season := filepath.Join(renamed, "Season 1")
+	writeFile(t, filepath.Join(season, "episode.mkv"))
+
+	scans := receiveScans(t, d)
+	if !slices.Contains(scans, season) {
+		t.Errorf("Got scans %q, want %q after renaming parent directory", scans, season)
+	}
+}
+
+func TestSubdirectoryMovedOutsideRootReleasesWatches(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	show := filepath.Join(root, "Show")
+	mkdirAll(t, filepath.Join(show, "Season 1"))
+	d := newWatchingDaemon(t, root)
+
+	rename(t, show, filepath.Join(outside, "Show"))
+	_ = receiveScans(t, d)
+
+	for _, name := range d.watcher.WatchList() {
+		if isWithin(name, show) {
+			t.Errorf("Watch %q below the moved directory remains", name)
+		}
+	}
+}
+
+func TestScanPathCreatedFileWithoutExtensionScansParent(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	mkdirAll(t, show)
+	d := newWatchingDaemon(t, root)
+
+	writeFile(t, filepath.Join(show, "README"))
+
+	scans := receiveScans(t, d)
+	if want := []string{show}; !slices.Equal(scans, want) {
+		t.Errorf("Got scans %q, want %q", scans, want)
 	}
 }
