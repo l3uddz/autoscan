@@ -241,7 +241,12 @@ func main() {
 			Msg("Failed initialising trigger")
 	}
 
-	servers := startServers(c.Host, c.Port, router)
+	servers, err := startServers(c.Host, c.Port, router, stop)
+	if err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Failed starting web server")
+	}
 	logConfigured(c)
 
 	// scan stats
@@ -339,16 +344,27 @@ func listenAddr(host string, port int) string {
 	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
 }
 
-// startServers serves handler on each host in the background and returns
-// the servers. A host without a port uses port. Autoscan stops if a server
-// fails.
-func startServers(hosts []string, port int, handler http.Handler) []*http.Server {
-	servers := make([]*http.Server, 0, len(hosts))
+// startServers listens on each host and serves handler in the background.
+// A host without a port uses port. It opens every listener before it serves,
+// so it returns the error of a host that cannot listen, and then serves on
+// no host. If a server fails later, it logs the error and calls stop.
+func startServers(hosts []string, port int, handler http.Handler, stop func()) ([]*http.Server, error) {
+	listeners := make([]net.Listener, 0, len(hosts))
 	for _, host := range hosts {
-		addr := listenAddr(host, port)
+		ln, err := net.Listen("tcp", listenAddr(host, port))
+		if err != nil {
+			for _, open := range listeners {
+				open.Close()
+			}
+			return nil, err
+		}
+		listeners = append(listeners, ln)
+	}
 
+	servers := make([]*http.Server, 0, len(listeners))
+	for _, ln := range listeners {
 		srv := &http.Server{
-			Addr:              addr,
+			Addr:              ln.Addr().String(),
 			Handler:           handler,
 			ReadHeaderTimeout: readHeaderTimeout,
 			IdleTimeout:       idleTimeout,
@@ -356,17 +372,18 @@ func startServers(hosts []string, port int, handler http.Handler) []*http.Server
 		servers = append(servers, srv)
 
 		go func() {
-			log.Info().Msgf("Starting server on %s", addr)
-			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal().
-					Str("addr", addr).
+			log.Info().Msgf("Starting server on %s", srv.Addr)
+			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+				log.Error().
+					Str("addr", srv.Addr).
 					Err(err).
-					Msg("Failed starting web server")
+					Msg("Web server failed, shutting down")
+				stop()
 			}
 		}()
 	}
 
-	return servers
+	return servers, nil
 }
 
 // logConfigured logs how many triggers and targets c configures.
