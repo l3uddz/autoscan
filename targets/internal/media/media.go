@@ -64,7 +64,7 @@ func SendUpdated(c *httpapi.Client, path string, updateType string) error {
 		Updates: []update{{Path: path, UpdateType: updateType}},
 	}
 
-	return c.PostJSON("Library/Media/Updated", payload)
+	return c.PostJSON(payload, "Library", "Media", "Updated")
 }
 
 // A PathAPI is a media server client whose scan request takes only a path.

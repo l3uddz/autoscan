@@ -450,6 +450,11 @@ The target reads the list at most once a minute.
 A folder that is still in no library after a new read does not cause another read for one hour.
 The target then sends no scan for that folder and logs a warning.
 
+The URL of a target must start with `http://` or `https://` and contain a host.
+It can contain a path, such as `https://domain.tld/plex` for a reverse proxy, and `user:password@` for Basic authentication.
+It must not contain a query or a fragment, so put the token in the `token` field.
+If the URL is not valid, the target does not connect, and Autoscan logs the error and retries it.
+
 Autoscan identifies a target by its type and full configured URL.
 If several entries use the same type and URL, their order distinguishes them.
 If you remove a target, Autoscan removes its pending deliveries.
@@ -631,6 +636,7 @@ host:
 ```
 
 Autoscan uses the value of `port` for each host entry that has no port.
+Write an IPv6 address with a port in brackets, such as `[::1]:5959`. Without a port, `::1` and `[::1]` both work.
 You need the `host` field only to listen on more than one interface.
 
 ## Other installation options

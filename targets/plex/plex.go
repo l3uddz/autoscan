@@ -37,7 +37,10 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, err
 	}
 
-	api := newAPIClient(c.URL, c.Token, l)
+	api, err := newAPIClient(c.URL, c.Token, l)
+	if err != nil {
+		return nil, err
+	}
 
 	version, err := api.Version()
 	if err != nil {

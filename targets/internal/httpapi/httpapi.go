@@ -13,8 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -50,22 +48,55 @@ type Config struct {
 // A Client sends requests to one media server.
 type Client struct {
 	client *http.Client
+	base   *url.URL
 	config Config
 }
 
-// New returns a Client for c.
-func New(c Config) *Client {
+// New returns a Client for c. It returns an error if c.BaseURL is not an
+// http or https URL with a host, or if it has a query or a fragment.
+func New(c Config) (*Client, error) {
+	base, err := parseBaseURL(c.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Client{
 		client: &http.Client{Timeout: timeout},
+		base:   base,
 		config: c,
+	}, nil
+}
+
+// parseBaseURL parses the base URL of a target. A path prefix, such as
+// the path of a reverse proxy, and a user name with password are allowed.
+// A port without a host name, such as http://:32400, is allowed too,
+// because Go then dials the local system.
+// The errors do not contain the URL, because it can contain credentials.
+func parseBaseURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target url: %w", withoutURL(err))
 	}
+
+	switch {
+	case u.Scheme != "http" && u.Scheme != "https":
+		return nil, errors.New("target url must start with http:// or https://")
+	case u.Host == "":
+		return nil, errors.New("target url has no host")
+	case u.RawQuery != "" || u.ForceQuery:
+		return nil, errors.New("target url must not have a query")
+	case u.Fragment != "":
+		return nil, errors.New("target url must not have a fragment")
+	}
+
+	return u, nil
 }
 
 // Send sends a request without a body and closes the response body.
-// endpoint is relative to the base URL. If query is not nil, it replaces
-// the query of the request URL.
-func (c *Client) Send(method string, endpoint string, query url.Values) error {
-	req, err := c.newRequest(method, endpoint, query, nil)
+// elem are the path elements after the base URL. If query is not nil, it
+// is the query of the request URL.
+func (c *Client) Send(method string, query url.Values, elem ...string) error {
+	req, err := c.newRequest(method, query, nil, elem)
 	if err != nil {
 		return err
 	}
@@ -82,13 +113,13 @@ func (c *Client) Send(method string, endpoint string, query url.Values) error {
 
 // PostJSON sends v as the JSON body of a POST request and closes the
 // response body.
-func (c *Client) PostJSON(endpoint string, v any) error {
+func (c *Client) PostJSON(v any, elem ...string) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("encoding request body: %w", err)
 	}
 
-	req, err := c.newRequest(http.MethodPost, endpoint, nil, bytes.NewReader(b))
+	req, err := c.newRequest(http.MethodPost, nil, bytes.NewReader(b), elem)
 	if err != nil {
 		return err
 	}
@@ -104,8 +135,8 @@ func (c *Client) PostJSON(endpoint string, v any) error {
 }
 
 // GetJSON sends a GET request and decodes the JSON response body into v.
-func (c *Client) GetJSON(endpoint string, v any) error {
-	req, err := c.newRequest(http.MethodGet, endpoint, nil, nil)
+func (c *Client) GetJSON(v any, elem ...string) error {
+	req, err := c.newRequest(http.MethodGet, nil, nil, elem)
 	if err != nil {
 		return err
 	}
@@ -123,16 +154,16 @@ func (c *Client) GetJSON(endpoint string, v any) error {
 	return nil
 }
 
-// newRequest returns a request for endpoint, which is relative to the base
-// URL. If query is not nil, it replaces the query of the request URL.
-func (c *Client) newRequest(method string, endpoint string, query url.Values, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, joinURL(c.config.BaseURL, endpoint), body)
+// newRequest returns a request for the path elements elem after the base
+// URL. JoinPath returns a new URL, so Prepare can change the request URL
+// without changing the base URL.
+func (c *Client) newRequest(method string, query url.Values, body io.Reader, elem []string) (*http.Request, error) {
+	u := c.base.JoinPath(elem...)
+	u.RawQuery = query.Encode()
+
+	req, err := http.NewRequest(method, u.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
-	}
-
-	if query != nil {
-		req.URL.RawQuery = query.Encode()
 	}
 
 	return req, nil
@@ -222,10 +253,4 @@ func responseError(res *http.Response, authMessage string) error {
 	default:
 		return errors.New(res.Status)
 	}
-}
-
-func joinURL(base string, endpoint string) string {
-	// credits: https://stackoverflow.com/a/57220413
-	p := path.Join(endpoint)
-	return fmt.Sprintf("%s/%s", strings.TrimRight(base, "/"), strings.TrimLeft(p, "/"))
 }

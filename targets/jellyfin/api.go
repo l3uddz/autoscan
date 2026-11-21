@@ -17,8 +17,8 @@ type apiClient struct {
 	http *httpapi.Client
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
-	return apiClient{http: httpapi.New(httpapi.Config{
+func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, error) {
+	client, err := httpapi.New(httpapi.Config{
 		BaseURL: baseURL,
 		Log:     log,
 		Prepare: func(req *http.Request) {
@@ -37,11 +37,12 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 		},
 		AuthMessage:  "invalid jellyfin token",
 		SecretParams: []string{apiKeyParam},
-	})}
+	})
+	return apiClient{http: client}, err
 }
 
 func (c apiClient) Available() error {
-	if err := c.http.Send(http.MethodGet, "System/Info", nil); err != nil {
+	if err := c.http.Send(http.MethodGet, nil, "System", "Info"); err != nil {
 		return fmt.Errorf("availability: %w", err)
 	}
 
@@ -54,7 +55,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 		Locations []string `json:"Locations"`
 	}
 
-	if err := c.http.GetJSON("Library/VirtualFolders", &resp); err != nil {
+	if err := c.http.GetJSON(&resp, "Library", "VirtualFolders"); err != nil {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 

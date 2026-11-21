@@ -16,8 +16,8 @@ type apiClient struct {
 	http *httpapi.Client
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
-	return apiClient{http: httpapi.New(httpapi.Config{
+func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, error) {
+	client, err := httpapi.New(httpapi.Config{
 		BaseURL: baseURL,
 		Log:     log,
 		Prepare: func(req *http.Request) {
@@ -25,7 +25,8 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 			req.Header.Set("Accept", "application/json") // Force JSON Response.
 		},
 		AuthMessage: "invalid plex token",
-	})}
+	})
+	return apiClient{http: client}, err
 }
 
 func (c apiClient) Version() (string, error) {
@@ -35,7 +36,9 @@ func (c apiClient) Version() (string, error) {
 		}
 	}
 
-	if err := c.http.GetJSON("", &resp); err != nil {
+	// The trailing "/" requests the root path with its trailing slash, also
+	// behind a reverse proxy with a path prefix.
+	if err := c.http.GetJSON(&resp, "/"); err != nil {
 		return "", fmt.Errorf("version: %w", err)
 	}
 
@@ -55,7 +58,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 		} `json:"MediaContainer"`
 	}
 
-	if err := c.http.GetJSON("library/sections", &resp); err != nil {
+	if err := c.http.GetJSON(&resp, "library", "sections"); err != nil {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 
@@ -70,8 +73,8 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 }
 
 func (c apiClient) Scan(path string, libraryID int) error {
-	endpoint := "library/sections/" + strconv.Itoa(libraryID) + "/refresh"
-	if err := c.http.Send(http.MethodGet, endpoint, url.Values{"path": {path}}); err != nil {
+	query := url.Values{"path": {path}}
+	if err := c.http.Send(http.MethodGet, query, "library", "sections", strconv.Itoa(libraryID), "refresh"); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 

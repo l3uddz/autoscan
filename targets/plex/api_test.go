@@ -17,7 +17,10 @@ func TestScanRefreshesLibraryPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	api := newAPIClient(srv.URL, "token", zerolog.Nop())
+	api, err := newAPIClient(srv.URL, "token", zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := api.Scan("/mnt/tv/Show", 5); err != nil {
 		t.Fatalf("Scan returned %v", err)
 	}
