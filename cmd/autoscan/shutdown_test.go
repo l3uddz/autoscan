@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/migrate"
 	"github.com/l3uddz/autoscan/processor"
 	"github.com/l3uddz/autoscan/triggers/inotify"
 )
@@ -181,11 +183,59 @@ func TestNewWatchersCollectsAllErrors(t *testing.T) {
 		{Paths: []inotify.PathConfig{{Path: "/mnt/tv", Rewrite: []autoscan.Rewrite{{From: "("}}}}},
 	}
 
-	watchers, err := newWatchers(configs, func(...autoscan.Scan) error { return nil })
+	watchers, err := newWatchers(configs, func(context.Context, ...autoscan.Scan) error { return nil })
 	if watchers != nil {
 		t.Errorf("newWatchers returned %v with an error", watchers)
 	}
 	if err == nil || !strings.Contains(err.Error(), "inotify-1") || !strings.Contains(err.Error(), "inotify-2") {
 		t.Errorf("newWatchers error = %v, want errors naming inotify-1 and inotify-2", err)
+	}
+}
+
+func TestAddContextStopsAtDeadlineWhenDatabaseLocked(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "autoscan.db")
+
+	db, err := openDatabase(t.Context(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mg, err := migrate.New(db, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc, err := processor.New(processor.Config{DB: db, Migrator: mg})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold an exclusive write lock on a separate connection to the same SQLite
+	// file. openDatabase configures busy_timeout(5000); AddContext must stop at
+	// its shorter context deadline rather than waiting the full 5 seconds.
+	locker, err := openDatabase(t.Context(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = locker.Close() })
+
+	lockTx, err := locker.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockTx.Rollback()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err = proc.AddContext(ctx, autoscan.Scan{Folder: "/mnt/tv/Show", Time: time.Now()})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("AddContext succeeded while another connection held a write lock")
+	}
+	if elapsed >= 2*time.Second {
+		t.Errorf("AddContext waited %v under a 150ms deadline (busy_timeout overrun)", elapsed)
 	}
 }

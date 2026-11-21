@@ -198,7 +198,7 @@ func run(version string) error {
 	}
 
 	// Validate and build all triggers before starting any background workers.
-	watchers, err := newWatchers(c.Triggers.Inotify, proc.Add)
+	watchers, err := newWatchers(c.Triggers.Inotify, proc.AddContext)
 	if err != nil {
 		return err
 	}
@@ -260,11 +260,11 @@ func buildTargets(c config) ([]processor.Target, error) {
 
 // newWatchers creates an inotify trigger for each config in configs without
 // starting them, so startup failures do not leak watcher goroutines.
-func newWatchers(configs []inotify.Config, callback autoscan.ProcessorFunc) ([]*inotify.Trigger, error) {
+func newWatchers(configs []inotify.Config, callback func(context.Context, ...autoscan.Scan) error) ([]*inotify.Trigger, error) {
 	watchers := make([]*inotify.Trigger, 0, len(configs))
 	var errs []error
 	for i, t := range configs {
-		watcher, err := inotify.New(t, callback)
+		watcher, err := inotify.NewWithContext(t, callback)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("initialise inotify-%d: %w", i+1, err))
 			continue
