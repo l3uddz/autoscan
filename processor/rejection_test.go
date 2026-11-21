@@ -76,13 +76,49 @@ func TestFolderInNoLibraryIsSkipped(t *testing.T) {
 		synctest.Wait()
 		assertDelivered(t, target, "movies", "tv")
 		assertTargetStatus(t, proc, "server", 0, "", time.Time{})
-		if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 1 || skipped != 1 {
-			t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 1, 1", processed, skipped)
+		if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 2 || skipped != 1 {
+			t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 2, 1", processed, skipped)
 		}
 		if n := opens.Load(); n != 1 {
 			t.Errorf("Open calls = %d, want 1: a skipped folder reset the client", n)
 		}
 	})
+}
+
+func TestSkippedScanCountsAsProcessedInEitherOrder(t *testing.T) {
+	for _, skipFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip first %v", skipFirst), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// The second target waits until the first is done with the scan.
+				release := make(chan struct{})
+				receive := func(autoscan.Scan) error { return nil }
+				skip := func(scan autoscan.Scan) error { return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary) }
+				first, second := receive, skip
+				if skipFirst {
+					first, second = skip, receive
+				}
+				gated := func(scan autoscan.Scan) error {
+					<-release
+					return second(scan)
+				}
+				proc := testProcessorWithConfig(t, Config{Targets: []Target{
+					connectedTarget("first", &fakeTarget{onScan: first}),
+					connectedTarget("second", &fakeTarget{onScan: gated}),
+				}})
+				addScans(t, proc, "folder")
+				defer startProcessor(t, proc)()
+
+				time.Sleep(time.Second)
+				synctest.Wait()
+				close(release)
+				time.Sleep(time.Second)
+				synctest.Wait()
+				if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 1 || skipped != 1 {
+					t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 1, 1", processed, skipped)
+				}
+			})
+		})
+	}
 }
 
 func TestSkippedScanKeepsLastError(t *testing.T) {

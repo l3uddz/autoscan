@@ -85,7 +85,8 @@ func (p *Processor) ScansProcessed() int64 {
 }
 
 // ScansSkipped returns how many deliveries the processor removed because
-// the scan folder was in no library of the target.
+// the scan folder was in no library of the target. A skipped scan that no
+// target needs any more also counts as processed.
 func (p *Processor) ScansSkipped() int64 {
 	return p.skipped.Load()
 }
