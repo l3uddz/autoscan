@@ -20,8 +20,8 @@ type Config struct {
 	ScanDelay  time.Duration
 	Targets    []Target
 
-	Db *sql.DB
-	Mg *migrate.Migrator
+	DB       *sql.DB
+	Migrator *migrate.Migrator
 }
 
 // Target identifies a configured destination across restarts. Open can contact
@@ -42,7 +42,7 @@ type TargetStatus struct {
 }
 
 func New(c Config) (*Processor, error) {
-	store, err := newDatastore(c.Db, c.Mg)
+	store, err := newDatastore(c.DB, c.Migrator)
 	if err != nil {
 		return nil, err
 	}

@@ -343,7 +343,7 @@ func processorWithDB(t *testing.T, db *sql.DB, cfg Config) *Processor {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Db, cfg.Mg = db, mg
+	cfg.DB, cfg.Migrator = db, mg
 	proc, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)

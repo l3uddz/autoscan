@@ -193,8 +193,8 @@ func main() {
 		MinimumAge: c.MinimumAge,
 		ScanDelay:  c.ScanDelay,
 		Targets:    targets,
-		Db:         db,
-		Mg:         mg,
+		DB:         db,
+		Migrator:   mg,
 	})
 
 	if err != nil {

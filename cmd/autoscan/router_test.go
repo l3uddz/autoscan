@@ -78,7 +78,7 @@ func newRouterTestProcessor(t *testing.T, cfg processor.Config) (*processor.Proc
 		t.Fatal(err)
 	}
 
-	cfg.Db, cfg.Mg = db, mg
+	cfg.DB, cfg.Migrator = db, mg
 	proc, err := processor.New(cfg)
 	if err != nil {
 		t.Fatal(err)
