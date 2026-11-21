@@ -1,3 +1,4 @@
+// Package lidarr is the webhook trigger for Lidarr.
 package lidarr
 
 import (

@@ -1,3 +1,4 @@
+// Package sonarr is the webhook trigger for Sonarr.
 package sonarr
 
 import (

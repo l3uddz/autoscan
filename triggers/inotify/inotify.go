@@ -1,3 +1,5 @@
+// Package inotify is the trigger that watches local directories with
+// inotify and makes a scan for each folder that changes.
 package inotify
 
 import (
