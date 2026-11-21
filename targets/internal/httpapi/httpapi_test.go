@@ -418,6 +418,17 @@ func TestCheckRedirect(t *testing.T) {
 	}
 }
 
+func TestCheckRedirectRefusesLaterDowngrade(t *testing.T) {
+	via := []*http.Request{
+		httptest.NewRequest(http.MethodGet, "http://plex.invalid/old", nil),
+		httptest.NewRequest(http.MethodGet, "https://plex.invalid/new", nil),
+	}
+	next := httptest.NewRequest(http.MethodGet, "http://plex.invalid/final", nil)
+	if err := checkRedirect(next, via); err == nil {
+		t.Error("checkRedirect followed a redirect from https back to http")
+	}
+}
+
 func TestRedirectToOtherPortIsUnavailable(t *testing.T) {
 	var leaked string
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -82,9 +82,9 @@ var errRedirect = errors.New("target redirected the request to another host, por
 // checkRedirect follows a redirect only to the same host and port with the
 // same method. It allows a change from http to https, but not back.
 func checkRedirect(req *http.Request, via []*http.Request) error {
-	first := via[0]
+	first, previous := via[0], via[len(via)-1]
 	sameHost := strings.EqualFold(req.URL.Hostname(), first.URL.Hostname()) && explicitPort(req.URL) == explicitPort(first.URL)
-	downgrade := first.URL.Scheme == "https" && req.URL.Scheme != "https"
+	downgrade := previous.URL.Scheme == "https" && req.URL.Scheme != "https"
 	if !sameHost || downgrade || req.Method != first.Method {
 		return errRedirect
 	}
