@@ -216,7 +216,10 @@ func run(version string) error {
 
 	// Catch stop signals only after startup. Before this point, a stop
 	// signal ends autoscan at once, for example while it waits for config.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// A web server that fails also stops autoscan, and run returns its error.
+	serving, serverFailed := context.WithCancelCause(context.Background())
+	defer serverFailed(nil)
+	ctx, stop := signal.NotifyContext(serving, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// daemon triggers
@@ -237,7 +240,7 @@ func run(version string) error {
 		return fmt.Errorf("initialise trigger: %w", err)
 	}
 
-	servers, err := startServers(c.Host, c.Port, router, stop)
+	servers, err := startServers(c.Host, c.Port, router, serverFailed)
 	if err != nil {
 		return fmt.Errorf("start web server: %w", err)
 	}
@@ -266,12 +269,14 @@ func run(version string) error {
 	}()
 
 	<-ctx.Done()
-	log.Info().Msg("Shutting down")
+	// The cause of serving is nil after a stop signal.
+	serverErr := context.Cause(serving)
+	log.Info().Err(serverErr).Msg("Shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	shutdown(shutdownCtx, servers, processorDone)
-	return nil
+	return serverErr
 }
 
 // shutdown stops all servers at the same time, so no server accepts new
@@ -337,8 +342,8 @@ func listenAddr(host string, port int) string {
 // startServers listens on each host and serves handler in the background.
 // A host without a port uses port. It opens every listener before it serves,
 // so it returns the error of a host that cannot listen, and then serves on
-// no host. If a server fails later, it logs the error and calls stop.
-func startServers(hosts []string, port int, handler http.Handler, stop func()) ([]*http.Server, error) {
+// no host. If a server fails later, it calls fail with the error.
+func startServers(hosts []string, port int, handler http.Handler, fail func(error)) ([]*http.Server, error) {
 	listeners := make([]net.Listener, 0, len(hosts))
 	for _, host := range hosts {
 		ln, err := net.Listen("tcp", listenAddr(host, port))
@@ -361,19 +366,19 @@ func startServers(hosts []string, port int, handler http.Handler, stop func()) (
 		}
 		servers = append(servers, srv)
 
-		go func() {
-			log.Info().Msgf("Starting server on %s", srv.Addr)
-			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-				log.Error().
-					Str("addr", srv.Addr).
-					Err(err).
-					Msg("Web server failed, shutting down")
-				stop()
-			}
-		}()
+		go serve(srv, ln, fail)
 	}
 
 	return servers, nil
+}
+
+// serve serves srv on ln until srv shuts down. If srv fails, serve calls
+// fail with the error.
+func serve(srv *http.Server, ln net.Listener, fail func(error)) {
+	log.Info().Msgf("Starting server on %s", srv.Addr)
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		fail(fmt.Errorf("web server on %s: %w", srv.Addr, err))
+	}
 }
 
 // logConfigured logs how many triggers and targets c configures.

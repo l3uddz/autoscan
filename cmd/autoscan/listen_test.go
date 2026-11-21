@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -33,7 +34,7 @@ func TestStartServersReturnsListenError(t *testing.T) {
 	defer taken.Close()
 
 	free := "127.0.0.1:0"
-	servers, err := startServers([]string{free, taken.Addr().String()}, 0, http.NotFoundHandler(), func() {})
+	servers, err := startServers([]string{free, taken.Addr().String()}, 0, http.NotFoundHandler(), func(error) {})
 	if err == nil {
 		for _, srv := range servers {
 			srv.Close()
@@ -46,7 +47,7 @@ func TestStartServersReturnsListenError(t *testing.T) {
 }
 
 func TestStartServersServesEachHost(t *testing.T) {
-	servers, err := startServers([]string{"127.0.0.1:0", "127.0.0.1:0"}, 0, http.HandlerFunc(healthHandler), func() {})
+	servers, err := startServers([]string{"127.0.0.1:0", "127.0.0.1:0"}, 0, http.HandlerFunc(healthHandler), func(error) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,5 +66,19 @@ func TestStartServersServesEachHost(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", srv.Addr, res.StatusCode)
 		}
+	}
+}
+
+func TestServeReportsFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+
+	var failure error
+	serve(&http.Server{Addr: ln.Addr().String()}, ln, func(err error) { failure = err })
+	if failure == nil || !strings.Contains(failure.Error(), ln.Addr().String()) {
+		t.Errorf("serve reported %v, want the error of the server on %s", failure, ln.Addr())
 	}
 }
