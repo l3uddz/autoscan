@@ -25,7 +25,6 @@ const (
 type LibraryList struct {
 	log       zerolog.Logger
 	load      func(context.Context) ([]Library, error)
-	now       func() time.Time
 	libraries []Library
 
 	// attemptedAt is the time of the last load, and loadErr is its error.
@@ -42,7 +41,6 @@ func NewLibraryList(ctx context.Context, log zerolog.Logger, load func(context.C
 	l := &LibraryList{
 		log:       log,
 		load:      load,
-		now:       time.Now,
 		unmatched: make(map[string]time.Time),
 	}
 
@@ -63,7 +61,7 @@ func (l *LibraryList) Matching(ctx context.Context, folder string) ([]Library, e
 		return libs, nil
 	}
 
-	now := l.now()
+	now := time.Now()
 	if now.Sub(l.attemptedAt) < minReloadInterval {
 		if l.loadErr != nil {
 			return nil, fmt.Errorf("reload libraries: %w", l.loadErr)
@@ -88,7 +86,7 @@ func (l *LibraryList) Matching(ctx context.Context, folder string) ([]Library, e
 
 // reload loads the libraries and removes the expired unmatched folders.
 func (l *LibraryList) reload(ctx context.Context) error {
-	l.attemptedAt = l.now()
+	l.attemptedAt = time.Now()
 	libraries, err := l.load(ctx)
 	l.loadErr = err
 	if err != nil {
