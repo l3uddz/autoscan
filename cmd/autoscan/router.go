@@ -22,6 +22,7 @@ import (
 	"github.com/l3uddz/autoscan/triggers/radarr"
 	"github.com/l3uddz/autoscan/triggers/readarr"
 	"github.com/l3uddz/autoscan/triggers/sonarr"
+	"github.com/l3uddz/autoscan/triggers/webhook"
 )
 
 // getRouter returns the HTTP routes. GET /status also reports watchers,
@@ -69,10 +70,10 @@ func getRouter(c config, proc *processor.Processor, watchers []*inotify.Trigger)
 
 		// OLD-style HTTP-triggers. Can be converted to the /{trigger}/{id} format in a 2.0 release.
 		err = errors.Join(
-			addTriggers(r, proc.Add, c.Triggers.Lidarr, func(t lidarr.Config) string { return t.Name }, lidarr.New),
-			addTriggers(r, proc.Add, c.Triggers.Radarr, func(t radarr.Config) string { return t.Name }, radarr.New),
-			addTriggers(r, proc.Add, c.Triggers.Readarr, func(t readarr.Config) string { return t.Name }, readarr.New),
-			addTriggers(r, proc.Add, c.Triggers.Sonarr, func(t sonarr.Config) string { return t.Name }, sonarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Lidarr, lidarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Radarr, radarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Readarr, readarr.New),
+			addTriggers(r, proc.Add, c.Triggers.Sonarr, sonarr.New),
 		)
 	})
 	if err != nil {
@@ -82,16 +83,16 @@ func getRouter(c config, proc *processor.Processor, watchers []*inotify.Trigger)
 	return r, nil
 }
 
-// addTriggers registers a POST route for each trigger configuration.
+// addTriggers registers a POST route for each -arr trigger configuration.
 // The route is the trigger name. It stops at the first trigger that fails.
-func addTriggers[C any](r chi.Router, callback autoscan.ProcessorFunc, configs []C, name func(C) string, create func(C, autoscan.ProcessorFunc) (http.Handler, error)) error {
+func addTriggers(r chi.Router, callback autoscan.ProcessorFunc, configs []webhook.Config, create func(webhook.Config, autoscan.ProcessorFunc) (http.Handler, error)) error {
 	for _, c := range configs {
 		handler, err := create(c, callback)
 		if err != nil {
-			return fmt.Errorf("trigger %s: %w", name(c), err)
+			return fmt.Errorf("trigger %s: %w", c.Name, err)
 		}
 
-		r.Post("/"+name(c), handler.ServeHTTP)
+		r.Post("/"+c.Name, handler.ServeHTTP)
 	}
 
 	return nil
