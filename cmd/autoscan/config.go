@@ -82,6 +82,30 @@ func getBinaryPath() string {
 	return dir
 }
 
+// loadConfig waits for the config file at path, then decodes and checks it.
+// It logs each warning of the check.
+func loadConfig(path string) (config, error) {
+	file, err := waitForConfig(path, 5*time.Second)
+	if err != nil {
+		return config{}, fmt.Errorf("open config: %w", err)
+	}
+	defer file.Close()
+
+	c, err := decodeConfig(file)
+	if err != nil {
+		return config{}, fmt.Errorf("decode config: %w", err)
+	}
+	warnings, err := validateConfig(c)
+	for _, warning := range warnings {
+		log.Warn().Msg(warning)
+	}
+	if err != nil {
+		return config{}, fmt.Errorf("check config: %w", err)
+	}
+
+	return c, nil
+}
+
 // waitForConfig opens the config file at path. If the file is missing or
 // empty, it checks again after each interval until the file has content.
 // A container can then start before the user creates config.yml.
