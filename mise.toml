@@ -1,5 +1,6 @@
 [tools]
 go = "1.27"
+golangci-lint = "2.15.0"
 goreleaser = "2.20.2"
 
 [tasks.vendor]
@@ -15,22 +16,14 @@ description = "Run the Go tests with the race detector"
 # GO_PACKAGES adds arguments to go test, for example GO_PACKAGES="-run TestX".
 run = "go test ./... -cover -v -race ${GO_PACKAGES:-}"
 
+[tasks.format]
+description = "Format the Go files with the formatters in .golangci.yml"
+run = "golangci-lint fmt"
+
 [tasks.lint]
-description = "Check gofmt formatting, then run go vet and staticcheck"
-# gofmt -l exits 0 even when it lists files, so fail on any output.
-# Only tracked files are checked, because vendor/ is not gofmt clean.
-run = [
-  '''
-  unformatted="$(gofmt -l $(git ls-files '*.go'))"
-  if [ -n "$unformatted" ]; then
-    echo "gofmt needed for:"
-    echo "$unformatted"
-    exit 1
-  fi
-  ''',
-  "go vet ./...",
-  "go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...",
-]
+description = "Check formatting, then run go vet, staticcheck, and the complexity limit"
+# fmt --diff fails on a file that needs formatting. Both skip vendor/.
+run = ["golangci-lint fmt --diff", "golangci-lint run"]
 
 [tasks.build]
 description = "Build a development binary in dist/"
