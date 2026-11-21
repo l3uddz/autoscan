@@ -1,11 +1,12 @@
 package migrate
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"path"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 )
 
@@ -93,6 +94,7 @@ func (m *Migrator) parse(fsys fs.FS) ([]*migration, error) {
 
 	// parse migrations
 	migrations := make([]*migration, 0)
+	seen := make(map[int]string)
 	for _, f := range files {
 		// skip dirs
 		if f.IsDir() {
@@ -104,6 +106,10 @@ func (m *Migrator) parse(fsys fs.FS) ([]*migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse migration: %w", err)
 		}
+		if prev, exists := seen[version]; exists {
+			return nil, fmt.Errorf("duplicate migration version %d: %s and %s", version, prev, f.Name())
+		}
+		seen[version] = f.Name()
 
 		b, err := fs.ReadFile(fsys, path.Join(m.dir, f.Name()))
 		if err != nil {
@@ -119,8 +125,8 @@ func (m *Migrator) parse(fsys fs.FS) ([]*migration, error) {
 	}
 
 	// sort migrations
-	sort.Slice(migrations, func(i, j int) bool {
-		return migrations[i].Version < migrations[j].Version
+	slices.SortFunc(migrations, func(a, b *migration) int {
+		return cmp.Compare(a.Version, b.Version)
 	})
 
 	return migrations, nil

@@ -1,6 +1,10 @@
 package migrate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"testing/fstest"
+)
 
 func TestMigrationVersion(t *testing.T) {
 	type Test struct {
@@ -36,5 +40,18 @@ func TestMigrationVersion(t *testing.T) {
 				t.Fatalf("migrationVersion(%q) = %d, %v, want %d, nil", tc.File, got, err, tc.Want)
 			}
 		})
+	}
+}
+
+func TestParseRejectsDuplicateVersions(t *testing.T) {
+	fsys := fstest.MapFS{
+		"migrations/1_first.sql":  {Data: []byte("SELECT 1;")},
+		"migrations/1_second.sql": {Data: []byte("SELECT 2;")},
+	}
+
+	m := &Migrator{dir: "migrations"}
+	_, err := m.parse(fsys)
+	if err == nil || !strings.Contains(err.Error(), "duplicate migration version 1") {
+		t.Fatalf("parse returned %v, want a duplicate migration version error", err)
 	}
 }
