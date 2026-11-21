@@ -1,6 +1,7 @@
 package plex
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,14 +23,13 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, 
 		Log:     log,
 		Prepare: func(req *http.Request) {
 			req.Header.Set("X-Plex-Token", token)
-			req.Header.Set("Accept", "application/json") // Force JSON Response.
 		},
 		AuthMessage: "invalid plex token",
 	})
 	return apiClient{http: client}, err
 }
 
-func (c apiClient) Version() (string, error) {
+func (c apiClient) Version(ctx context.Context) (string, error) {
 	var resp struct {
 		MediaContainer struct {
 			Version string
@@ -38,14 +38,20 @@ func (c apiClient) Version() (string, error) {
 
 	// The trailing "/" requests the root path with its trailing slash, also
 	// behind a reverse proxy with a path prefix.
-	if err := c.http.GetJSON(&resp, "/"); err != nil {
+	if err := c.http.GetJSON(ctx, &resp, "/"); err != nil {
 		return "", fmt.Errorf("version: %w", err)
 	}
 
 	return resp.MediaContainer.Version, nil
 }
 
-func (c apiClient) Libraries() ([]media.Library, error) {
+// Available checks that the server answers with its version.
+func (c apiClient) Available(ctx context.Context) error {
+	_, err := c.Version(ctx)
+	return err
+}
+
+func (c apiClient) Libraries(ctx context.Context) ([]media.Library, error) {
 	var resp struct {
 		MediaContainer struct {
 			Libraries []struct {
@@ -58,7 +64,7 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 		} `json:"MediaContainer"`
 	}
 
-	if err := c.http.GetJSON(&resp, "library", "sections"); err != nil {
+	if err := c.http.GetJSON(ctx, &resp, "library", "sections"); err != nil {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 
@@ -72,9 +78,20 @@ func (c apiClient) Libraries() ([]media.Library, error) {
 	return libraries, nil
 }
 
-func (c apiClient) Scan(path string, libraryID int) error {
+// Scan refreshes path in each library of libs.
+func (c apiClient) Scan(ctx context.Context, path string, libs []media.Library) error {
+	for _, lib := range libs {
+		if err := c.refresh(ctx, path, lib.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// refresh asks Plex to scan path in the library with libraryID.
+func (c apiClient) refresh(ctx context.Context, path string, libraryID int) error {
 	query := url.Values{"path": {path}}
-	if err := c.http.Send(http.MethodGet, query, "library", "sections", strconv.Itoa(libraryID), "refresh"); err != nil {
+	if err := c.http.Send(ctx, http.MethodGet, query, "library", "sections", strconv.Itoa(libraryID), "refresh"); err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 

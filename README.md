@@ -70,6 +70,9 @@ This field can contain multiple rules.
 Start each rule with a `-`.
 The `from` field is a regular expression (regexp) that matches the path as the trigger sees it.
 The `to` field converts that path into a path that is local to Autoscan.
+After the rewrite, each folder of a webhook trigger must be an absolute path, such as `/mnt/tv`, `C:\TV`, or `\\server\tv`.
+A Windows drive letter needs a separator after the colon: `C:TV` and `C:` are relative paths.
+If a folder is still relative, the trigger responds with 400 Bad Request and queues no scan for that request.
 
 Targets work the other way around.
 A target converts the path that is local to Autoscan into a path that the target understands.
@@ -168,6 +171,7 @@ The manual endpoint is at `/triggers/manual`.
 
 The manual endpoint accepts one or more directory paths.
 Give each path in a `dir` query parameter.
+An empty `dir` value returns 400 Bad Request.
 If the configuration file sets a username and a password in the `authentication` option, the manual webhook uses basic authentication.
 The other webhooks use the same authentication.
 
@@ -186,6 +190,11 @@ curl --request POST \
 You can configure more than one HTTP trigger of the same type.
 In that case, each trigger MUST have a `name` field with a unique value.
 Autoscan uses the name to create the route `/triggers/:name`.
+All -arr triggers share these routes, so a name must be unique across Lidarr, Radarr, Readarr, and Sonarr.
+Only one -arr trigger can omit the name. Its route is `/triggers/`.
+A name cannot be `manual` or `manual/`, because the manual trigger uses those routes.
+A name cannot contain `{`, `}`, or `*`.
+Autoscan stops at startup if a name breaks these rules.
 
 Autoscan provides these -arrs:
 
@@ -317,6 +326,9 @@ The processor then saves the Scans to its datastore.
 
 _The processor uses SQLite as its datastore._
 
+If another program, such as the `sqlite3` shell or a backup tool, holds a lock on the database, Autoscan waits up to 5 seconds for it.
+Autoscan stops at startup if it cannot open the database file.
+
 In a separate process, the processor selects Scans from the datastore.
 It always groups the files in the same folder together.
 It waits until all files in that folder are older than the `minimum-age` value.
@@ -394,7 +406,8 @@ _Do not forget the `s`, `m`, or `h` suffix. Without a suffix, the time unit is n
 
 At the interval that `scan-stats` sets, Autoscan prints this information:
 
-- Scans processed
+- Scans processed: scans that no target needs any more, after each target received or skipped them
+- Scans skipped: deliveries that a target skipped, because the folder is in no library of that target
 - Scans remaining
 
 ### Processor status
@@ -415,10 +428,10 @@ If `authentication` sets both a username and a password, use the same Basic auth
 
 Each target has an `id`, a `pending` scan count, a `last_error`, and a `next_retry` time.
 The `id` uses the target type and its position in that type's configuration list. For example, `plex-1` identifies the first Plex target.
-`last_error` is a fixed message for the latest failure, or an empty string when the target has no retry state.
+`last_error` is a fixed message for the latest failure, or an empty string when no failure happened since the last successful scan delivery.
 `next_retry` is the UTC time of the next retry, or `null` when the target is not waiting for a retry.
 A shared blocker can delay delivery past that time.
-A target keeps its `last_error` after its retry time passes, until a scan delivery succeeds.
+A target keeps its `last_error` after its retry time passes, after a scan is set aside, and while its queue is empty, until a scan delivery succeeds.
 The response excludes raw target errors, credentials, and file paths.
 
 The endpoint returns HTTP 200 when `can_deliver` is `true` and HTTP 503 otherwise.
@@ -448,12 +461,19 @@ Plex, Emby, and Jellyfin targets read the library list of the server when they c
 If a scan folder is in no library, the target reads the list again, so it finds a library that you added later.
 The target reads the list at most once a minute.
 A folder that is still in no library after a new read does not cause another read for one hour.
-The target then sends no scan for that folder and logs a warning.
+The target then sends no scan for that folder.
+Autoscan logs a warning, removes the delivery for that target, and counts it as skipped.
+The skip keeps the last error of the target, which `/status` shows.
 
 The URL of a target must start with `http://` or `https://` and contain a host.
 It can contain a path, such as `https://domain.tld/plex` for a reverse proxy, and `user:password@` for Basic authentication.
 It must not contain a query or a fragment, so put the token in the `token` field.
-If the URL is not valid, the target does not connect, and Autoscan logs the error and retries it.
+Autoscan checks the URL, the token, and the rewrite rules of each target at startup.
+If a value cannot work, Autoscan stops with an error that names the target, such as `plex-2`.
+A token cannot contain a quote or a control character.
+Autoscan follows a redirect only to the same host and port with the same method.
+It also follows a redirect from `http://` to `https://` on the same host, but not from `https://` to `http://`.
+Any other redirect counts as an unavailable target, and the scans stay queued. In that case, set the URL to the address that answers.
 
 Autoscan identifies a target by its type and full configured URL.
 If several entries use the same type and URL, their order distinguishes them.
@@ -508,6 +528,7 @@ targets:
 ```
 
 - URL. The URL can point to the Docker container directly, to localhost, or to a reverse proxy in front of Emby.
+  Autoscan sends every request below `/emby` on that URL, so the proxy must forward `/emby`.
 - Token. Autoscan needs an Emby API Token to make requests for you. [This article](https://github.com/MediaBrowser/Emby/wiki/Api-Key-Authentication) tells you how to get a token. \
   _The article is a bit out of date._
 - Rewrite. Emby can run in a Docker container instead of on the host OS. Autoscan can also run in a Docker container. In both cases, you must rewrite the paths. For more information, read the [rewriting section](#rewriting-paths).
@@ -636,8 +657,20 @@ host:
 ```
 
 Autoscan uses the value of `port` for each host entry that has no port.
+The port must be between 0 and 65535.
 Write an IPv6 address with a port in brackets, such as `[::1]:5959`. Without a port, `::1` and `[::1]` both work.
 You need the `host` field only to listen on more than one interface.
+
+### Configuration checks
+
+Autoscan checks the configuration at startup.
+If a value cannot work, such as an invalid target URL, an empty inotify `path`, or a duplicate trigger name, Autoscan stops with an error.
+If a value works but is likely a mistake, Autoscan logs a warning and starts. These values cause a warning:
+
+- A negative `minimum-age`, `scan-delay`, or `scan-stats`.
+- Only one of `username` and `password` in `authentication` or in an Autoscan target.
+- A `verbosity` that is not a log level.
+- An inotify trigger without `paths`.
 
 ## Other installation options
 

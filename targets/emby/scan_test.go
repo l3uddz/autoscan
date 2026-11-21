@@ -19,7 +19,7 @@ func TestScanSendsOneUpdateForFolderInTwoLibraries(t *testing.T) {
 		switch r.URL.Path {
 		case "/emby/Library/SelectableMediaFolders":
 			w.Write([]byte(`[{"Name":"TV","SubFolders":[{"Path":"/mnt/tv"}]},{"Name":"TV 4K","SubFolders":[{"Path":"/mnt/tv"}]}]`))
-		case "/Library/Media/Updated":
+		case "/emby/Library/Media/Updated":
 			var body struct{ Updates []map[string]string }
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Errorf("Decoding update body: %v", err)
@@ -33,12 +33,12 @@ func TestScanSendsOneUpdateForFolderInTwoLibraries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	target, err := New(Config{URL: srv.URL, Token: "token"})
+	target, err := New(t.Context(), Config{URL: srv.URL, Token: "token"})
 	if err != nil {
 		t.Fatalf("New returned %v", err)
 	}
 
-	if err := target.Scan(autoscan.Scan{Folder: "/mnt/tv/Show"}); err != nil {
+	if err := target.Scan(t.Context(), autoscan.Scan{Folder: "/mnt/tv/Show"}); err != nil {
 		t.Fatalf("Scan returned %v", err)
 	}
 

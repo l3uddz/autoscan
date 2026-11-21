@@ -28,7 +28,7 @@ func TestMigrateReturnsCommitError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = mg.Migrate(&testMigrations, "test")
+	err = mg.Migrate(testMigrations, "test")
 	if err == nil || !strings.Contains(err.Error(), "commit") {
 		t.Fatalf("Migrate returned %v, want the commit error", err)
 	}
@@ -58,7 +58,7 @@ func TestMigrateReturnsVersionsReadError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = mg.Migrate(&testMigrations, "test")
+	err = mg.Migrate(testMigrations, "test")
 	if err == nil || !strings.Contains(err.Error(), "versions") {
 		t.Fatalf("Migrate returned %v, want the error from reading the versions", err)
 	}

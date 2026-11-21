@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -52,6 +53,149 @@ func TestRejectedScanIsSetAside(t *testing.T) {
 		if processed := proc.ScansProcessed(); processed != 1 {
 			t.Errorf("ScansProcessed = %d, want 1: a set-aside scan counted as processed", processed)
 		}
+	})
+}
+
+func TestFolderInNoLibraryIsSkipped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var opens atomic.Int32
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			if scan.Folder == "movies" {
+				return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary)
+			}
+			return nil
+		}}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{{ID: "server", Open: func(context.Context) (autoscan.Target, error) {
+			opens.Add(1)
+			return target, nil
+		}}}})
+		addScans(t, proc, "movies", "tv")
+		defer startProcessor(t, proc)()
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		assertDelivered(t, target, "movies", "tv")
+		assertTargetStatus(t, proc, "server", 0, "", time.Time{})
+		if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 2 || skipped != 1 {
+			t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 2, 1", processed, skipped)
+		}
+		if n := opens.Load(); n != 1 {
+			t.Errorf("Open calls = %d, want 1: a skipped folder reset the client", n)
+		}
+	})
+}
+
+func TestSkippedScanCountsAsProcessedInEitherOrder(t *testing.T) {
+	for _, skipFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip first %v", skipFirst), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// The second target waits until the first is done with the scan.
+				release := make(chan struct{})
+				receive := func(autoscan.Scan) error { return nil }
+				skip := func(scan autoscan.Scan) error { return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary) }
+				first, second := receive, skip
+				if skipFirst {
+					first, second = skip, receive
+				}
+				gated := func(scan autoscan.Scan) error {
+					<-release
+					return second(scan)
+				}
+				proc := testProcessorWithConfig(t, Config{Targets: []Target{
+					connectedTarget("first", &fakeTarget{onScan: first}),
+					connectedTarget("second", &fakeTarget{onScan: gated}),
+				}})
+				addScans(t, proc, "folder")
+				defer startProcessor(t, proc)()
+
+				time.Sleep(time.Second)
+				synctest.Wait()
+				close(release)
+				time.Sleep(time.Second)
+				synctest.Wait()
+				if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 1 || skipped != 1 {
+					t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 1, 1", processed, skipped)
+				}
+			})
+		})
+	}
+}
+
+func TestSkippedScanKeepsLastError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			if scan.Folder == "movies" {
+				return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary)
+			}
+			return errors.New("400 Bad Request")
+		}}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "bad", "movies")
+		defer startProcessor(t, proc)()
+
+		// The skip reaches no server, so /status keeps the error of the
+		// scan that was set aside.
+		time.Sleep(retriesUntilSetAside + time.Second)
+		synctest.Wait()
+		assertDelivered(t, target, "bad", "bad", "bad", "bad", "bad", "movies")
+		assertTargetStatus(t, proc, "server", 0, "400 Bad Request", time.Time{})
+	})
+}
+
+func TestNegativeMinimumAgeWaitsForScanTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{}
+		proc := testProcessorWithConfig(t, Config{MinimumAge: -time.Minute, Targets: []Target{connectedTarget("server", target)}})
+		// A scan time in the future, for example after the clock went back.
+		if err := proc.Add(autoscan.Scan{Folder: "folder", Time: time.Now().Add(30 * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+		defer startProcessor(t, proc)()
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		assertDelivered(t, target)
+	})
+}
+
+func TestSkipOfOldRevisionCountsOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var proc *Processor
+		var attempts atomic.Int32
+		target := &fakeTarget{onScan: func(scan autoscan.Scan) error {
+			// A new event for the folder arrives during the first attempt.
+			if attempts.Add(1) == 1 {
+				if err := proc.Add(autoscan.Scan{Folder: scan.Folder, Time: time.Now().Add(-time.Minute)}); err != nil {
+					t.Error(err)
+				}
+			}
+			return fmt.Errorf("%s: %w", scan.Folder, autoscan.ErrNoLibrary)
+		}}
+		proc = testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "movies")
+		defer startProcessor(t, proc)()
+
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		assertAttempts(t, target, 2)
+		if processed, skipped := proc.ScansProcessed(), proc.ScansSkipped(); processed != 1 || skipped != 1 {
+			t.Errorf("ScansProcessed, ScansSkipped = %d, %d, want 1, 1", processed, skipped)
+		}
+	})
+}
+
+func TestSetAsideScanKeepsLastError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{onScan: func(autoscan.Scan) error { return errors.New("400 Bad Request") }}
+		proc := testProcessorWithConfig(t, Config{Targets: []Target{connectedTarget("server", target)}})
+		addScans(t, proc, "bad")
+		defer startProcessor(t, proc)()
+
+		// Wait past the set-aside and the next idle poll of the empty queue.
+		time.Sleep(retriesUntilSetAside + pollInterval + time.Second)
+		synctest.Wait()
+		assertAttempts(t, target, maxScanAttempts)
+		assertTargetStatus(t, proc, "server", 0, "400 Bad Request", time.Time{})
 	})
 }
 

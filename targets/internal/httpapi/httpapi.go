@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -61,10 +63,63 @@ func New(c Config) (*Client, error) {
 	}
 
 	return &Client{
-		client: &http.Client{Timeout: timeout},
+		client: &http.Client{Timeout: timeout, CheckRedirect: checkRedirect},
 		base:   base,
 		config: c,
 	}, nil
+}
+
+// maxRedirects is how many redirects a request follows, as in Go's default.
+const maxRedirects = 10
+
+// errRedirect means that the target redirected a request to another host
+// or port, from https to http, or to another method, such as from a POST
+// to a GET. The token headers must not reach another address or travel
+// without encryption, and a scan sent as a GET is lost. The error marks the
+// target unavailable, so the scans stay queued.
+var errRedirect = errors.New("target redirected the request to another host, port, scheme, or method, set the target url to the address that answers")
+
+// checkRedirect follows a redirect only to the same host and port with the
+// same method. It allows a change from http to https, but not back.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	first, previous := via[0], via[len(via)-1]
+	sameHost := strings.EqualFold(req.URL.Hostname(), first.URL.Hostname()) && explicitPort(req.URL) == explicitPort(first.URL)
+	downgrade := previous.URL.Scheme == "https" && req.URL.Scheme != "https"
+	if !sameHost || downgrade || req.Method != first.Method {
+		return errRedirect
+	}
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	return nil
+}
+
+// explicitPort returns the port of u, or "" for the default port of its
+// scheme. A change from http to https on the default ports then keeps the
+// port.
+func explicitPort(u *url.URL) string {
+	port := u.Port()
+	if (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443") {
+		return ""
+	}
+	return port
+}
+
+// CheckBaseURL returns the error that New returns for the base URL raw.
+// The configuration checks it at startup.
+func CheckBaseURL(raw string) error {
+	_, err := parseBaseURL(raw)
+	return err
+}
+
+// CheckToken returns an error if token contains a quote or a control
+// character. Such a token breaks the header that carries it, so the server
+// rejects every request.
+func CheckToken(token string) error {
+	if strings.ContainsFunc(token, func(r rune) bool { return r < ' ' || r == 0x7f || r == '"' }) {
+		return errors.New("token contains a quote or a control character")
+	}
+	return nil
 }
 
 // parseBaseURL parses the base URL of a target. A path prefix, such as
@@ -92,81 +147,63 @@ func parseBaseURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// Send sends a request without a body and closes the response body.
+// Send sends a request without a body and ignores the response body.
 // elem are the path elements after the base URL. If query is not nil, it
-// is the query of the request URL.
-func (c *Client) Send(method string, query url.Values, elem ...string) error {
-	req, err := c.newRequest(method, query, nil, elem)
-	if err != nil {
-		return err
-	}
-
-	res, err := c.do(req)
-	if err != nil {
-		return err
-	}
-
-	// The server accepted the request, so a failed close does not fail it.
-	res.Body.Close()
-	return nil
+// is the query of the request URL. ctx ends the request.
+func (c *Client) Send(ctx context.Context, method string, query url.Values, elem ...string) error {
+	return c.send(ctx, method, query, nil, nil, elem)
 }
 
-// PostJSON sends v as the JSON body of a POST request and closes the
+// PostJSON sends v as the JSON body of a POST request and ignores the
 // response body.
-func (c *Client) PostJSON(v any, elem ...string) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("encoding request body: %w", err)
-	}
-
-	req, err := c.newRequest(http.MethodPost, nil, bytes.NewReader(b), elem)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := c.do(req)
-	if err != nil {
-		return err
-	}
-
-	res.Body.Close()
-	return nil
+func (c *Client) PostJSON(ctx context.Context, v any, elem ...string) error {
+	return c.send(ctx, http.MethodPost, nil, v, nil, elem)
 }
 
 // GetJSON sends a GET request and decodes the JSON response body into v.
-func (c *Client) GetJSON(v any, elem ...string) error {
-	req, err := c.newRequest(http.MethodGet, nil, nil, elem)
+func (c *Client) GetJSON(ctx context.Context, v any, elem ...string) error {
+	return c.send(ctx, http.MethodGet, nil, nil, v, elem)
+}
+
+// send sends a request for the path elements elem after the base URL. If
+// in is not nil, it is the JSON body. If out is not nil, send decodes the
+// JSON response body into it. JoinPath returns a new URL, so Prepare can
+// change the request URL without changing the base URL.
+func (c *Client) send(ctx context.Context, method string, query url.Values, in any, out any, elem []string) error {
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return fmt.Errorf("encoding request body: %w", err)
+		}
+		body = bytes.NewReader(b)
+	}
+
+	u := c.base.JoinPath(elem...)
+	u.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return err
+		return fmt.Errorf("creating request: %w", withoutURL(err))
+	}
+	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	res, err := c.do(req)
 	if err != nil {
 		return err
 	}
+	// The server accepted the request, so a failed close does not fail it.
 	defer res.Body.Close()
 
-	if err := json.NewDecoder(res.Body).Decode(v); err != nil {
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
 		return bodyError("decoding response", err)
 	}
-
 	return nil
-}
-
-// newRequest returns a request for the path elements elem after the base
-// URL. JoinPath returns a new URL, so Prepare can change the request URL
-// without changing the base URL.
-func (c *Client) newRequest(method string, query url.Values, body io.Reader, elem []string) (*http.Request, error) {
-	u := c.base.JoinPath(elem...)
-	u.RawQuery = query.Encode()
-
-	req, err := http.NewRequest(method, u.String(), body)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
-	}
-
-	return req, nil
 }
 
 // do prepares and sends req, and returns the response for a 2xx status.

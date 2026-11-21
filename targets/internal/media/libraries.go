@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -23,8 +24,7 @@ const (
 // Only one goroutine can use a LibraryList.
 type LibraryList struct {
 	log       zerolog.Logger
-	load      func() ([]Library, error)
-	now       func() time.Time
+	load      func(context.Context) ([]Library, error)
 	libraries []Library
 
 	// attemptedAt is the time of the last load, and loadErr is its error.
@@ -37,15 +37,14 @@ type LibraryList struct {
 }
 
 // NewLibraryList loads the libraries with load and returns the list.
-func NewLibraryList(log zerolog.Logger, load func() ([]Library, error)) (*LibraryList, error) {
+func NewLibraryList(ctx context.Context, log zerolog.Logger, load func(context.Context) ([]Library, error)) (*LibraryList, error) {
 	l := &LibraryList{
 		log:       log,
 		load:      load,
-		now:       time.Now,
 		unmatched: make(map[string]time.Time),
 	}
 
-	if err := l.reload(); err != nil {
+	if err := l.reload(ctx); err != nil {
 		return nil, err
 	}
 
@@ -57,12 +56,12 @@ func NewLibraryList(log zerolog.Logger, load func() ([]Library, error)) (*Librar
 // was less than minReloadInterval ago or folder caused a reload less than
 // folderReloadInterval ago. It returns an error if the reload fails, and it
 // returns the same error until the next reload can start.
-func (l *LibraryList) Matching(folder string) ([]Library, error) {
+func (l *LibraryList) Matching(ctx context.Context, folder string) ([]Library, error) {
 	if libs := matching(l.libraries, folder); len(libs) > 0 {
 		return libs, nil
 	}
 
-	now := l.now()
+	now := time.Now()
 	if now.Sub(l.attemptedAt) < minReloadInterval {
 		if l.loadErr != nil {
 			return nil, fmt.Errorf("reload libraries: %w", l.loadErr)
@@ -73,7 +72,7 @@ func (l *LibraryList) Matching(folder string) ([]Library, error) {
 		return nil, nil
 	}
 
-	if err := l.reload(); err != nil {
+	if err := l.reload(ctx); err != nil {
 		return nil, fmt.Errorf("reload libraries: %w", err)
 	}
 
@@ -86,9 +85,9 @@ func (l *LibraryList) Matching(folder string) ([]Library, error) {
 }
 
 // reload loads the libraries and removes the expired unmatched folders.
-func (l *LibraryList) reload() error {
-	l.attemptedAt = l.now()
-	libraries, err := l.load()
+func (l *LibraryList) reload(ctx context.Context) error {
+	l.attemptedAt = time.Now()
+	libraries, err := l.load(ctx)
 	l.loadErr = err
 	if err != nil {
 		return err

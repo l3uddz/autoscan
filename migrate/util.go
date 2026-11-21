@@ -1,9 +1,8 @@
 package migrate
 
 import (
-	"embed"
-	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"regexp"
 	"sort"
@@ -16,17 +15,18 @@ type migration struct {
 	Schema   string
 }
 
-// migrationName matches a migration file name and captures its version.
-var migrationName = regexp.MustCompile(`(?P<Version>\d+)\w?(?P<Name>.+)?\.sql`)
+// migrationName matches a migration file name, such as 2_scan_revision.sql
+// or 4.sql, and captures its version.
+var migrationName = regexp.MustCompile(`^(\d+)(?:_.+)?\.sql$`)
 
 // migrationVersion returns the version in a migration file name.
 func migrationVersion(name string) (int, error) {
 	match := migrationName.FindStringSubmatch(name)
 	if match == nil {
-		return 0, errors.New("no match found for given string")
+		return 0, fmt.Errorf("%q is not a migration file name, such as 1_init.sql", name)
 	}
 
-	return strconv.Atoi(match[migrationName.SubexpIndex("Version")])
+	return strconv.Atoi(match[1])
 }
 
 func (m *Migrator) verify() error {
@@ -84,9 +84,9 @@ func (m *Migrator) exec(component string, migration *migration) error {
 	return nil
 }
 
-func (m *Migrator) parse(fs *embed.FS) ([]*migration, error) {
+func (m *Migrator) parse(fsys fs.FS) ([]*migration, error) {
 	// parse migrations from filesystem
-	files, err := fs.ReadDir(m.dir)
+	files, err := fs.ReadDir(fsys, m.dir)
 	if err != nil {
 		return nil, fmt.Errorf("read migrations: %w", err)
 	}
@@ -105,7 +105,7 @@ func (m *Migrator) parse(fs *embed.FS) ([]*migration, error) {
 			return nil, fmt.Errorf("parse migration: %w", err)
 		}
 
-		b, err := fs.ReadFile(path.Join(m.dir, f.Name()))
+		b, err := fs.ReadFile(fsys, path.Join(m.dir, f.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read migration: %w", err)
 		}

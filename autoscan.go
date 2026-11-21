@@ -1,6 +1,7 @@
 package autoscan
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -21,14 +22,21 @@ type Scan struct {
 type ProcessorFunc func(...Scan) error
 
 // A Target receives a Scan from the Processor and translates the Scan
-// into a format understood by the target.
+// into a format understood by the target. ctx ends a request when
+// autoscan stops.
 type Target interface {
-	Scan(Scan) error
-	Available() error
+	Scan(ctx context.Context, scan Scan) error
+	Available(ctx context.Context) error
 }
 
 // ErrTargetUnavailable indicates that a target cannot accept scans.
 var ErrTargetUnavailable = errors.New("target unavailable")
+
+// ErrNoLibrary means that the scan folder is in no library of the target.
+// With several targets, this is normal for a folder that only some of them
+// hold. The processor removes the delivery without counting a processed
+// scan.
+var ErrNoLibrary = errors.New("folder is in no library of the target")
 
 type Rewrite struct {
 	From string `yaml:"from"`

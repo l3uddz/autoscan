@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -135,46 +134,62 @@ func main() {
 	applyDefaultPaths(&cli.Config, &cli.Database, &cli.Log)
 	log.Logger = newLogger(cli.Log, cli.Verbosity)
 
-	// datastore
-	db, err := sql.Open("sqlite", cli.Database)
-	if err != nil {
+	if err := run(version); err != nil {
 		log.Fatal().
 			Err(err).
-			Msg("Failed opening datastore")
+			Msg("Failed running autoscan")
 	}
-	db.SetMaxOpenConns(1)
+	log.Info().Msg("Stopped")
+}
+
+// run starts autoscan with the paths in cli and runs it until a stop
+// signal arrives. It returns an error if autoscan cannot start.
+func run(version string) error {
+	// datastore
+	db, err := openDatabase(context.Background(), cli.Database)
+	if err != nil {
+		return fmt.Errorf("open datastore: %w", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed closing datastore")
+		}
+	}()
 
 	// config
 	file, err := waitForConfig(cli.Config, 5*time.Second)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed opening config")
+		return fmt.Errorf("open config: %w", err)
 	}
 	defer file.Close()
 
 	c, err := decodeConfig(file)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed decoding config")
+		return fmt.Errorf("decode config: %w", err)
+	}
+	warnings, err := validateConfig(c)
+	for _, warning := range warnings {
+		log.Warn().Msg(warning)
+	}
+	if err != nil {
+		return fmt.Errorf("check config: %w", err)
 	}
 
 	// migrator
 	mg, err := migrate.New(db, "migrations")
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising migrator")
+		return fmt.Errorf("initialise migrator: %w", err)
 	}
 
 	// targets
-	targets := slices.Concat(
-		newTargets("autoscan", c.Targets.Autoscan, func(t ast.Config) string { return t.URL }, ast.New),
-		newTargets("plex", c.Targets.Plex, func(t plex.Config) string { return t.URL }, plex.New),
-		newTargets("emby", c.Targets.Emby, func(t emby.Config) string { return t.URL }, emby.New),
-		newTargets("jellyfin", c.Targets.Jellyfin, func(t jellyfin.Config) string { return t.URL }, jellyfin.New),
-	)
+	autoscanTargets, autoscanErr := newTargets("autoscan", c.Targets.Autoscan, ast.New)
+	plexTargets, plexErr := newTargets("plex", c.Targets.Plex, plex.New)
+	embyTargets, embyErr := newTargets("emby", c.Targets.Emby, emby.New)
+	jellyfinTargets, jellyfinErr := newTargets("jellyfin", c.Targets.Jellyfin, jellyfin.New)
+	if err := errors.Join(autoscanErr, plexErr, embyErr, jellyfinErr); err != nil {
+		return fmt.Errorf("check targets: %w", err)
+	}
+	targets := slices.Concat(autoscanTargets, plexTargets, embyTargets, jellyfinTargets)
 
 	// processor
 	proc, err := processor.New(processor.Config{
@@ -182,14 +197,11 @@ func main() {
 		MinimumAge: c.MinimumAge,
 		ScanDelay:  c.ScanDelay,
 		Targets:    targets,
-		Db:         db,
-		Mg:         mg,
+		DB:         db,
+		Migrator:   mg,
 	})
-
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising processor")
+		return fmt.Errorf("initialise processor: %w", err)
 	}
 
 	log.Info().
@@ -197,14 +209,17 @@ func main() {
 		Strs("anchors", c.Anchors).
 		Msg("Initialised processor")
 
-	// Check authentication. If no auth -> warn user.
-	if c.Auth.Username == "" || c.Auth.Password == "" {
+	// validateConfig already warns when only one of the two values is set.
+	if c.Auth.Username == "" && c.Auth.Password == "" {
 		log.Warn().Msg("Webhooks running without authentication")
 	}
 
 	// Catch stop signals only after startup. Before this point, a stop
 	// signal ends autoscan at once, for example while it waits for config.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// A web server that fails also stops autoscan, and run returns its error.
+	serving, serverFailed := context.WithCancelCause(context.Background())
+	defer serverFailed(nil)
+	ctx, stop := signal.NotifyContext(serving, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// daemon triggers
@@ -212,10 +227,7 @@ func main() {
 	for _, t := range c.Triggers.Inotify {
 		watcher, err := inotify.New(t, proc.Add)
 		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("trigger", "inotify").
-				Msg("Failed initialising trigger")
+			return fmt.Errorf("initialise inotify trigger: %w", err)
 		}
 
 		watchers = append(watchers, watcher)
@@ -225,12 +237,13 @@ func main() {
 	// http triggers
 	router, err := getRouter(c, proc, watchers)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising trigger")
+		return fmt.Errorf("initialise trigger: %w", err)
 	}
 
-	servers := startServers(c.Host, c.Port, router)
+	servers, err := startServers(c.Host, c.Port, router, serverFailed)
+	if err != nil {
+		return fmt.Errorf("start web server: %w", err)
+	}
 	logConfigured(c)
 
 	// scan stats
@@ -256,16 +269,14 @@ func main() {
 	}()
 
 	<-ctx.Done()
-	log.Info().Msg("Shutting down")
+	// The cause of serving is nil after a stop signal.
+	serverErr := context.Cause(serving)
+	log.Info().Err(serverErr).Msg("Shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	shutdown(shutdownCtx, servers, processorDone)
-
-	if err := db.Close(); err != nil {
-		log.Error().Err(err).Msg("Failed closing datastore")
-	}
-	log.Info().Msg("Stopped")
+	return serverErr
 }
 
 // shutdown stops all servers at the same time, so no server accepts new
@@ -328,34 +339,46 @@ func listenAddr(host string, port int) string {
 	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
 }
 
-// startServers serves handler on each host in the background and returns
-// the servers. A host without a port uses port. Autoscan stops if a server
-// fails.
-func startServers(hosts []string, port int, handler http.Handler) []*http.Server {
-	servers := make([]*http.Server, 0, len(hosts))
+// startServers listens on each host and serves handler in the background.
+// A host without a port uses port. It opens every listener before it serves,
+// so it returns the error of a host that cannot listen, and then serves on
+// no host. If a server fails later, it calls fail with the error.
+func startServers(hosts []string, port int, handler http.Handler, fail func(error)) ([]*http.Server, error) {
+	listeners := make([]net.Listener, 0, len(hosts))
 	for _, host := range hosts {
-		addr := listenAddr(host, port)
+		ln, err := net.Listen("tcp", listenAddr(host, port))
+		if err != nil {
+			for _, open := range listeners {
+				open.Close()
+			}
+			return nil, err
+		}
+		listeners = append(listeners, ln)
+	}
 
+	servers := make([]*http.Server, 0, len(listeners))
+	for _, ln := range listeners {
 		srv := &http.Server{
-			Addr:              addr,
+			Addr:              ln.Addr().String(),
 			Handler:           handler,
 			ReadHeaderTimeout: readHeaderTimeout,
 			IdleTimeout:       idleTimeout,
 		}
 		servers = append(servers, srv)
 
-		go func() {
-			log.Info().Msgf("Starting server on %s", addr)
-			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal().
-					Str("addr", addr).
-					Err(err).
-					Msg("Failed starting web server")
-			}
-		}()
+		go serve(srv, ln, fail)
 	}
 
-	return servers
+	return servers, nil
+}
+
+// serve serves srv on ln until srv shuts down. If srv fails, serve calls
+// fail with the error.
+func serve(srv *http.Server, ln net.Listener, fail func(error)) {
+	log.Info().Msgf("Starting server on %s", srv.Addr)
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		fail(fmt.Errorf("web server on %s: %w", srv.Addr, err))
+	}
 }
 
 // logConfigured logs how many triggers and targets c configures.
@@ -377,11 +400,33 @@ func logConfigured(c config) {
 		Msg("Configured targets")
 }
 
-func newTargets[C any](kind string, configs []C, rawURL func(C) string, open func(C) (autoscan.Target, error)) []processor.Target {
+// targetConfig is the configuration of one target.
+type targetConfig interface {
+	// BaseURL returns the configured URL. The target ID uses it.
+	BaseURL() string
+
+	// Validate returns an error for a value that cannot work.
+	Validate() error
+}
+
+// newTargets returns a processor target for each configuration in configs.
+// It checks every configuration first, so that a bad value stops autoscan
+// at startup instead of failing each connection.
+func newTargets[C targetConfig](kind string, configs []C, open func(context.Context, C) (autoscan.Target, error)) ([]processor.Target, error) {
+	var errs []error
+	for i, cfg := range configs {
+		if err := cfg.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("%s-%d: %w", kind, i+1, err))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+
 	targets := make([]processor.Target, 0, len(configs))
 	occurrences := make(map[string]int)
 	for i, cfg := range configs {
-		address := rawURL(cfg)
+		address := cfg.BaseURL()
 		occurrences[address]++
 		// The URL can contain credentials. Only include its host and a digest
 		// in the ID, and distinguish repeated entries for the same address.
@@ -393,10 +438,10 @@ func newTargets[C any](kind string, configs []C, rawURL func(C) string, open fun
 		targets = append(targets, processor.Target{
 			ID:          id,
 			StatusLabel: fmt.Sprintf("%s-%d", kind, i+1),
-			Open: func() (autoscan.Target, error) {
-				return open(cfg)
+			Open: func(ctx context.Context) (autoscan.Target, error) {
+				return open(ctx, cfg)
 			},
 		})
 	}
-	return targets
+	return targets, nil
 }

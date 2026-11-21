@@ -18,6 +18,8 @@ func TestMigrationVersion(t *testing.T) {
 		{Name: "Multi-digit version", File: "12_add_index.sql", Want: 12},
 		{Name: "Version without a name", File: "4.sql", Want: 4},
 		{Name: "Not a migration", File: "README.md", WantErr: true},
+		{Name: "Version after a prefix", File: "backup_1_init.sql", WantErr: true},
+		{Name: "Text after the extension", File: "1_init.sql.bak", WantErr: true},
 	}
 
 	for _, tc := range testCases {

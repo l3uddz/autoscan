@@ -20,8 +20,8 @@ type Config struct {
 	ScanDelay  time.Duration
 	Targets    []Target
 
-	Db *sql.DB
-	Mg *migrate.Migrator
+	DB       *sql.DB
+	Migrator *migrate.Migrator
 }
 
 // Target identifies a configured destination across restarts. Open can contact
@@ -29,7 +29,7 @@ type Config struct {
 type Target struct {
 	ID          string
 	StatusLabel string
-	Open        func() (autoscan.Target, error)
+	Open        func(ctx context.Context) (autoscan.Target, error)
 }
 
 // TargetStatus reports persisted delivery and retry state for a target.
@@ -42,7 +42,7 @@ type TargetStatus struct {
 }
 
 func New(c Config) (*Processor, error) {
-	store, err := newDatastore(c.Db, c.Mg)
+	store, err := newDatastore(c.DB, c.Migrator)
 	if err != nil {
 		return nil, err
 	}
@@ -50,9 +50,10 @@ func New(c Config) (*Processor, error) {
 		return nil, fmt.Errorf("configure target deliveries: %w", err)
 	}
 
+	// A negative minimum age would deliver a scan before its time.
 	return &Processor{
 		anchors:    c.Anchors,
-		minimumAge: c.MinimumAge,
+		minimumAge: max(0, c.MinimumAge),
 		scanDelay:  c.ScanDelay,
 		targets:    c.Targets,
 		store:      store,
@@ -66,6 +67,7 @@ type Processor struct {
 	targets    []Target
 	store      *datastore
 	processed  atomic.Int64
+	skipped    atomic.Int64
 
 	anchorMu    sync.Mutex
 	anchorProbe *anchorProbe
@@ -81,6 +83,13 @@ func (p *Processor) ScansRemaining() (int, error) {
 
 func (p *Processor) ScansProcessed() int64 {
 	return p.processed.Load()
+}
+
+// ScansSkipped returns how many deliveries the processor removed because
+// the scan folder was in no library of the target. A skipped scan that no
+// target needs any more also counts as processed.
+func (p *Processor) ScansSkipped() int64 {
+	return p.skipped.Load()
 }
 
 // Run starts one worker for each target and waits for them to exit.

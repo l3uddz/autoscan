@@ -2,9 +2,9 @@ package migrate
 
 import (
 	"database/sql"
-	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 
 	"modernc.org/sqlite"
 )
@@ -35,9 +35,11 @@ func New(db *sql.DB, dir string) (*Migrator, error) {
 	return m, nil
 }
 
-func (m *Migrator) Migrate(fs *embed.FS, component string) error {
+// Migrate runs the migrations in the directory of m in fsys that component
+// has not run yet, in the order of their versions.
+func (m *Migrator) Migrate(fsys fs.FS, component string) error {
 	// parse migrations
-	migrations, err := m.parse(fs)
+	migrations, err := m.parse(fsys)
 	if err != nil {
 		return fmt.Errorf("parse: %w", err)
 	}

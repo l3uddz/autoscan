@@ -194,7 +194,7 @@ func TestRequestTimeoutIsUnavailable(t *testing.T) {
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(done) })
 
-	if err := newTestClient(t, srv.URL).Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := newTestClient(t, srv.URL).Send(t.Context(), http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
@@ -211,7 +211,7 @@ func TestBodyTimeoutIsUnavailable(t *testing.T) {
 	t.Cleanup(func() { close(done) })
 
 	var v struct{}
-	if err := newTestClient(t, srv.URL).GetJSON(&v); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := newTestClient(t, srv.URL).GetJSON(t.Context(), &v); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 }
@@ -228,7 +228,7 @@ func TestSendBuildsRequest(t *testing.T) {
 		Log:     zerolog.Nop(),
 		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
 	})
-	if err := c.Send(http.MethodPost, url.Values{"path": {"/mnt/tv"}}, "library", "sections", "1", "refresh"); err != nil {
+	if err := c.Send(t.Context(), http.MethodPost, url.Values{"path": {"/mnt/tv"}}, "library", "sections", "1", "refresh"); err != nil {
 		t.Fatalf("Send returned %v", err)
 	}
 
@@ -240,6 +240,9 @@ func TestSendBuildsRequest(t *testing.T) {
 	}
 	if h := got.Header.Get("X-Token"); h != "token" {
 		t.Errorf("X-Token header = %q, want token", h)
+	}
+	if h := got.Header.Get("Accept"); h != "application/json" {
+		t.Errorf("Accept header = %q, want application/json", h)
 	}
 }
 
@@ -258,7 +261,7 @@ func TestFailedRequestLogRemovesSecrets(t *testing.T) {
 		},
 		SecretParams: []string{"ApiKey"},
 	})
-	if err := c.Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+	if err := c.Send(t.Context(), http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
 		t.Fatalf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
 	}
 
@@ -308,7 +311,7 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 			got = ""
 			c := mustNew(t, Config{BaseURL: tc.Base, Log: zerolog.Nop()})
 			c.client.Transport = &http.Transport{}
-			if err := c.Send(http.MethodGet, nil, tc.Elem...); err != nil {
+			if err := c.Send(t.Context(), http.MethodGet, nil, tc.Elem...); err != nil {
 				t.Fatalf("Send returned %v", err)
 			}
 			if got != tc.Want {
@@ -357,11 +360,120 @@ func TestRequestDoesNotChangeBaseURL(t *testing.T) {
 			req.URL.RawQuery = q.Encode()
 		},
 	})
-	if err := c.Send(http.MethodGet, url.Values{"path": {"/mnt"}}, "library"); err != nil {
+	if err := c.Send(t.Context(), http.MethodGet, url.Values{"path": {"/mnt"}}, "library"); err != nil {
 		t.Fatalf("Send returned %v", err)
 	}
 
 	if got, want := c.base.String(), srv.URL+"/plex"; got != want {
 		t.Errorf("base URL = %q after a request, want %q", got, want)
+	}
+}
+
+func TestRedirectToOtherMethodIsUnavailable(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+		}
+	}))
+	defer srv.Close()
+
+	err := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()}).Send(t.Context(), http.MethodPost, nil, "old")
+	if !errors.Is(err, autoscan.ErrTargetUnavailable) {
+		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
+	}
+	if len(methods) != 1 {
+		t.Errorf("server got %v, want only the POST", methods)
+	}
+}
+
+func TestCheckRedirect(t *testing.T) {
+	var testCases = []struct {
+		Name    string
+		From    string
+		To      string
+		Method  string
+		WantErr bool
+	}{
+		{"Same host and port", "http://plex.invalid:32400/old", "http://plex.invalid:32400/new", http.MethodGet, false},
+		{"Upgrade to https", "http://plex.invalid/old", "https://plex.invalid/new", http.MethodGet, false},
+		{"Upgrade to https with default ports", "http://plex.invalid:80/old", "https://plex.invalid:443/new", http.MethodGet, false},
+		{"Host in other case", "http://Plex.invalid:32400/old", "http://plex.invalid:32400/new", http.MethodGet, false},
+		{"Default port left out", "http://plex.invalid:80/old", "http://plex.invalid/new", http.MethodGet, false},
+		{"Other host", "http://plex.invalid/", "http://other.invalid/", http.MethodGet, true},
+		{"Other port", "http://plex.invalid:32400/", "http://plex.invalid:8080/", http.MethodGet, true},
+		{"Downgrade to http", "https://plex.invalid/", "http://plex.invalid/", http.MethodGet, true},
+		{"Other method", "http://plex.invalid/old", "http://plex.invalid/new", http.MethodPost, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			first := httptest.NewRequest(http.MethodGet, tc.From, nil)
+			next := httptest.NewRequest(tc.Method, tc.To, nil)
+			if err := checkRedirect(next, []*http.Request{first}); (err != nil) != tc.WantErr {
+				t.Errorf("checkRedirect = %v, want error %v", err, tc.WantErr)
+			}
+		})
+	}
+}
+
+func TestCheckRedirectRefusesLaterDowngrade(t *testing.T) {
+	via := []*http.Request{
+		httptest.NewRequest(http.MethodGet, "http://plex.invalid/old", nil),
+		httptest.NewRequest(http.MethodGet, "https://plex.invalid/new", nil),
+	}
+	next := httptest.NewRequest(http.MethodGet, "http://plex.invalid/final", nil)
+	if err := checkRedirect(next, via); err == nil {
+		t.Error("checkRedirect followed a redirect from https back to http")
+	}
+}
+
+func TestRedirectToOtherPortIsUnavailable(t *testing.T) {
+	var leaked string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("X-Token")
+	}))
+	defer other.Close()
+	// Both servers listen on 127.0.0.1, on different ports.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: srv.URL,
+		Log:     zerolog.Nop(),
+		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
+	})
+	if err := c.Send(t.Context(), http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
+	}
+	if leaked != "" {
+		t.Error("the token reached the other host")
+	}
+}
+
+func TestRedirectOnSameHostIsFollowed(t *testing.T) {
+	var gotToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+			return
+		}
+		gotToken = r.Header.Get("X-Token")
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: srv.URL,
+		Log:     zerolog.Nop(),
+		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
+	})
+	if err := c.Send(t.Context(), http.MethodGet, nil, "old"); err != nil {
+		t.Fatalf("Send returned %v", err)
+	}
+	if gotToken != "token" {
+		t.Errorf("X-Token after the redirect = %q, want token", gotToken)
 	}
 }

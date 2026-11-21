@@ -31,6 +31,10 @@ type Config struct {
 // ErrMissingFields means that an event lacks a field that the trigger needs.
 var ErrMissingFields = errors.New("required fields are missing")
 
+// errRelativeFolder means that a folder is not an absolute path after the
+// rewrite. A media server cannot find such a folder.
+var errRelativeFolder = errors.New("folder is not an absolute path after the rewrite")
+
 // An Event is what a trigger reads from one webhook request.
 type Event struct {
 	// Type is the event type, for logs. The -arrs send the type "Test"
@@ -47,9 +51,9 @@ type Event struct {
 type Parser func(r *http.Request) (Event, error)
 
 // New returns the webhook handler for parse. It uses the priority, the
-// rewrite rules, and the verbosity of c. now returns the scan time. The
-// handler sends the scans to callback.
-func New(c Config, parse Parser, now func() time.Time, callback autoscan.ProcessorFunc) (http.Handler, error) {
+// rewrite rules, and the verbosity of c. The handler sends the scans to
+// callback.
+func New(c Config, parse Parser, callback autoscan.ProcessorFunc) (http.Handler, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
 		return nil, err
@@ -63,7 +67,6 @@ func New(c Config, parse Parser, now func() time.Time, callback autoscan.Process
 		level:    level,
 		hasLevel: hasLevel,
 		parse:    parse,
-		now:      now,
 		callback: callback,
 	}, nil
 }
@@ -74,7 +77,6 @@ type handler struct {
 	level    zerolog.Level
 	hasLevel bool
 	parse    Parser
-	now      func() time.Time
 	callback autoscan.ProcessorFunc
 }
 
@@ -95,7 +97,12 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scans := h.scans(event.Folders)
+	scans, err := h.scans(event.Folders)
+	if err != nil {
+		rlog.Error().Err(err).Msg("Invalid request")
+		rw.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	if len(scans) == 0 {
 		rlog.Debug().Str("event", event.Type).Msg("No folders to scan")
 		rw.WriteHeader(http.StatusOK)
@@ -132,8 +139,11 @@ func (h handler) withLogLevel(r *http.Request) *http.Request {
 
 // scans rewrites each folder and returns one scan for each unique result.
 // It keeps the order of the folders. It skips a folder that is empty before
-// or after the rewrite, so the processor never gets a scan for "".
-func (h handler) scans(folders []string) []autoscan.Scan {
+// or after the rewrite, so the processor never gets a scan for "". It
+// returns an error if a folder is not an absolute path after the rewrite.
+// The scans of one event have the same time.
+func (h handler) scans(folders []string) ([]autoscan.Scan, error) {
+	now := time.Now()
 	seen := make(map[string]bool, len(folders))
 	scans := make([]autoscan.Scan, 0, len(folders))
 
@@ -146,16 +156,19 @@ func (h handler) scans(folders []string) []autoscan.Scan {
 		if folder == "" || seen[folder] {
 			continue
 		}
+		if !absolutePath(folder) {
+			return nil, fmt.Errorf("%w: %s", errRelativeFolder, folder)
+		}
 
 		seen[folder] = true
 		scans = append(scans, autoscan.Scan{
 			Folder:   folder,
 			Priority: h.priority,
-			Time:     h.now(),
+			Time:     now,
 		})
 	}
 
-	return scans
+	return scans, nil
 }
 
 // maxBodyBytes is the largest webhook body that DecodeJSON reads.
@@ -213,12 +226,22 @@ func FileEvent(eventType string, files []File) (Event, error) {
 // the separators of the input, so that rewrite rules match each folder in
 // the same form as the other paths of the event.
 
-// windowsPath reports whether p is an absolute Windows path, such as
-// C:\TV or \\server\share.
+// windowsPath reports whether p is a Windows path with a drive letter or
+// a UNC path, such as C:\TV or \\server\share.
 func windowsPath(p string) bool {
 	hasDrive := len(p) >= 2 && p[1] == ':' &&
 		('a' <= p[0] && p[0] <= 'z' || 'A' <= p[0] && p[0] <= 'Z')
 	return hasDrive || strings.HasPrefix(p, `\\`)
+}
+
+// absolutePath reports whether p is an absolute Unix or Windows path. A
+// drive letter needs a separator after the colon, because C:TV and C: are
+// relative to the current folder of drive C.
+func absolutePath(p string) bool {
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return windowsPath(p) && len(p) > 2 && (p[2] == '\\' || p[2] == '/')
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.

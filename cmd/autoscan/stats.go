@@ -25,6 +25,7 @@ func scanStats(proc *processor.Processor, interval time.Duration) {
 		log.Info().
 			Int("remaining", sm).
 			Int64("processed", proc.ScansProcessed()).
+			Int64("skipped", proc.ScansSkipped()).
 			Msg("Scan stats")
 	}
 }

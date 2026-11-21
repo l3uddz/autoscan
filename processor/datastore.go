@@ -33,7 +33,7 @@ var (
 
 func newDatastore(db *sql.DB, mg *migrate.Migrator) (*datastore, error) {
 	// migrations
-	if err := mg.Migrate(&migrations, "processor"); err != nil {
+	if err := mg.Migrate(migrations, "processor"); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 

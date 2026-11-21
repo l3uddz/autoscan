@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 func TestStatusReadyAfterReconnectWithYoungScans(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var failed atomic.Bool
-		target := Target{ID: "plex", Open: func() (autoscan.Target, error) {
+		target := Target{ID: "plex", Open: func(context.Context) (autoscan.Target, error) {
 			if failed.CompareAndSwap(false, true) {
 				return nil, errors.New("offline")
 			}
@@ -69,4 +70,32 @@ func TestStatusStopsWaitingForHungAnchorCheck(t *testing.T) {
 			t.Error("Status started a second anchor check while one was running")
 		}
 	})
+}
+
+func TestStatusReadsWhileAnotherProcessWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "autoscan.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=busy_timeout(100)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	proc := processorWithDB(t, db, Config{})
+
+	other, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	lock, err := other.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.Exec(`INSERT INTO scan_target (id) VALUES ('other')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := proc.store.queueStatus(t.Context()); err != nil {
+		t.Errorf("queueStatus returned %v while another process holds the write lock", err)
+	}
 }

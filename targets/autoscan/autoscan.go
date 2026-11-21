@@ -1,6 +1,9 @@
 package autoscan
 
 import (
+	"context"
+	"errors"
+
 	"github.com/rs/zerolog"
 
 	"github.com/l3uddz/autoscan"
@@ -15,13 +18,24 @@ type Config struct {
 	Verbosity string             `yaml:"verbosity"`
 }
 
+// BaseURL returns the configured URL of the other autoscan.
+func (c Config) BaseURL() string {
+	return c.URL
+}
+
+// Validate returns an error for each value of c that cannot work.
+func (c Config) Validate() error {
+	_, rewriteErr := autoscan.NewRewriter(c.Rewrite)
+	return errors.Join(httpapi.CheckBaseURL(c.URL), rewriteErr)
+}
+
 type target struct {
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
 	api     apiClient
 }
 
-func New(c Config) (autoscan.Target, error) {
+func New(_ context.Context, c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "autoscan").
 		Str("url", httpapi.RedactURL(c.URL)).Logger()
@@ -43,7 +57,7 @@ func New(c Config) (autoscan.Target, error) {
 	}, nil
 }
 
-func (t target) Scan(scan autoscan.Scan) error {
+func (t target) Scan(ctx context.Context, scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
 	// send scan request
@@ -53,7 +67,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(scanFolder); err != nil {
+	if err := t.api.Scan(ctx, scanFolder); err != nil {
 		return err
 	}
 
@@ -61,6 +75,6 @@ func (t target) Scan(scan autoscan.Scan) error {
 	return nil
 }
 
-func (t target) Available() error {
-	return t.api.Available()
+func (t target) Available(ctx context.Context) error {
+	return t.api.Available(ctx)
 }

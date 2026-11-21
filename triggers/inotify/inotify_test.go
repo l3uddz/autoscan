@@ -1,6 +1,11 @@
 package inotify
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/l3uddz/autoscan"
+)
 
 func TestGetPathObject(t *testing.T) {
 	type Test struct {
@@ -109,5 +114,12 @@ func TestGetPathObject(t *testing.T) {
 				t.Errorf("Got path %q, want %q", got.Path, tc.WantPath)
 			}
 		})
+	}
+}
+
+func TestNewRejectsEmptyPath(t *testing.T) {
+	c := Config{Paths: []PathConfig{{Path: "/mnt/tv"}, {}}}
+	if _, err := New(c, func(...autoscan.Scan) error { return nil }); !errors.Is(err, errEmptyPath) {
+		t.Errorf("New returned %v, want %v", err, errEmptyPath)
 	}
 }

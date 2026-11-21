@@ -24,8 +24,13 @@ func TestDefaultConfigDirectoryUsesUserConfigDirWhenAvailable(t *testing.T) {
 		t.Fatalf("expected %s, got %s", want, dir)
 	}
 
-	if _, err := os.Stat(want); err != nil {
+	info, err := os.Stat(want)
+	if err != nil {
 		t.Fatalf("expected config directory %s to exist: %v", want, err)
+	}
+	// The directory holds the tokens, so only the owner can read it.
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("config directory mode = %o, want 700", perm)
 	}
 
 	if bcd := getBinaryPath(); bcd != binDir {
@@ -145,4 +150,83 @@ func setBinaryPath(t *testing.T) string {
 	})
 
 	return binDir
+}
+
+func TestValidateConfig(t *testing.T) {
+	type Test struct {
+		Name         string
+		YAML         string
+		WantErr      string
+		WantWarnings []string
+	}
+
+	var testCases = []Test{
+		{Name: "Defaults", YAML: "{}"},
+		{
+			Name: "One trigger without a name",
+			YAML: "triggers:\n  sonarr:\n    - priority: 1\n",
+		},
+		{
+			Name:    "Port out of range",
+			YAML:    "port: 70000\n",
+			WantErr: "port",
+		},
+		{
+			Name:    "Duplicate trigger names across types",
+			YAML:    "triggers:\n  sonarr:\n    - name: arr\n  radarr:\n    - name: arr\n",
+			WantErr: `trigger name "arr" is used more than once`,
+		},
+		{
+			Name:    "Two triggers without a name",
+			YAML:    "triggers:\n  sonarr:\n    - priority: 1\n    - priority: 2\n",
+			WantErr: `trigger name "" is used more than once`,
+		},
+		{
+			Name:    "Trigger named manual",
+			YAML:    "triggers:\n  lidarr:\n    - name: manual\n",
+			WantErr: `trigger name "manual" is reserved`,
+		},
+		{
+			Name:    "Trigger name below the manual route",
+			YAML:    "triggers:\n  sonarr:\n    - name: manual/\n",
+			WantErr: `trigger name "manual/" is reserved`,
+		},
+		{
+			Name:    "Trigger name with a route pattern",
+			YAML:    "triggers:\n  readarr:\n    - name: \"{id}\"\n",
+			WantErr: `trigger name "{id}" contains`,
+		},
+		{
+			Name: "Values that work but are likely mistakes",
+			YAML: "minimum-age: -1m\nscan-delay: -1s\nscan-stats: -1h\n" +
+				"authentication:\n  username: user\n" +
+				"triggers:\n  manual:\n    verbosity: loud\n  inotify:\n    - priority: 1\n" +
+				"targets:\n  autoscan:\n    - url: http://autoscan:3030\n      password: secret\n",
+			WantWarnings: []string{
+				"minimum-age is negative, so autoscan uses 0",
+				"scan-delay is negative, so autoscan uses 0",
+				"scan-stats is negative, so autoscan logs no scan stats",
+				"authentication needs a username and a password, so the webhooks run without authentication",
+				`manual trigger: verbosity "loud" is not a log level, so it uses the global log level`,
+				"inotify-1 has no paths, so it watches nothing",
+				"autoscan-1 needs a username and a password, so it sends requests without authentication",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			c, err := decodeConfig(strings.NewReader(tc.YAML))
+			if err != nil {
+				t.Fatal(err)
+			}
+			warnings, err := validateConfig(c)
+			if tc.WantErr == "" && err != nil || tc.WantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.WantErr)) {
+				t.Errorf("validateConfig error = %v, want %q", err, tc.WantErr)
+			}
+			if !slices.Equal(warnings, tc.WantWarnings) {
+				t.Errorf("warnings = %q, want %q", warnings, tc.WantWarnings)
+			}
+		})
+	}
 }

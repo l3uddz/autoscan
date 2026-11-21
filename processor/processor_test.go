@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -17,7 +18,7 @@ type fakeTarget struct {
 	scans []autoscan.Scan
 }
 
-func (f *fakeTarget) Scan(scan autoscan.Scan) error {
+func (f *fakeTarget) Scan(_ context.Context, scan autoscan.Scan) error {
 	f.mu.Lock()
 	f.scans = append(f.scans, scan)
 	f.mu.Unlock()
@@ -27,7 +28,7 @@ func (f *fakeTarget) Scan(scan autoscan.Scan) error {
 	return f.err
 }
 
-func (f *fakeTarget) Available() error {
+func (f *fakeTarget) Available(context.Context) error {
 	return f.err
 }
 

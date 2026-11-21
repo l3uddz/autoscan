@@ -37,11 +37,6 @@ func TestHandler(t *testing.T) {
 		}},
 	}
 
-	currentTime := time.Now()
-	now = func() time.Time {
-		return currentTime
-	}
-
 	var testCases = []Test{
 		{
 			"Download Event",
@@ -55,7 +50,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Interstellar (2014)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -72,7 +66,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Tenet (2020)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -89,7 +82,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Wonder Woman 1984 (2020)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -106,7 +98,6 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Deadpool (2016)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -123,12 +114,10 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Deadpool (2016)",
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Deadpool",
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -145,12 +134,10 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   `C:\Movies\Deadpool (2016)`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 					{
 						Folder:   `C:\Movies\Deadpool`,
 						Priority: 5,
-						Time:     currentTime,
 					},
 				},
 			},
@@ -191,6 +178,10 @@ func TestHandler(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			var got []autoscan.Scan
 			callback := func(scans ...autoscan.Scan) error {
+				// The webhook package tests the scan time.
+				for i := range scans {
+					scans[i].Time = time.Time{}
+				}
 				got = scans
 				return nil
 			}
