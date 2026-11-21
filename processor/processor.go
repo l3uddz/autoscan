@@ -50,9 +50,10 @@ func New(c Config) (*Processor, error) {
 		return nil, fmt.Errorf("configure target deliveries: %w", err)
 	}
 
+	// A negative minimum age would deliver a scan before its time.
 	return &Processor{
 		anchors:    c.Anchors,
-		minimumAge: c.MinimumAge,
+		minimumAge: max(0, c.MinimumAge),
 		scanDelay:  c.ScanDelay,
 		targets:    c.Targets,
 		store:      store,

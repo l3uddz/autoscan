@@ -142,6 +142,22 @@ func TestSkippedScanKeepsLastError(t *testing.T) {
 	})
 }
 
+func TestNegativeMinimumAgeWaitsForScanTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := &fakeTarget{}
+		proc := testProcessorWithConfig(t, Config{MinimumAge: -time.Minute, Targets: []Target{connectedTarget("server", target)}})
+		// A scan time in the future, for example after the clock went back.
+		if err := proc.Add(autoscan.Scan{Folder: "folder", Time: time.Now().Add(30 * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+		defer startProcessor(t, proc)()
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		assertDelivered(t, target)
+	})
+}
+
 func TestSetAsideScanKeepsLastError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		target := &fakeTarget{onScan: func(autoscan.Scan) error { return errors.New("400 Bad Request") }}
