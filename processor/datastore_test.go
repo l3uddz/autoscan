@@ -112,6 +112,26 @@ func TestUpsert(t *testing.T) {
 				Time:     time.Time{}.Add(3),
 			},
 		},
+		{
+			Name: "Time shall advance but not move backwards",
+			Scans: []autoscan.Scan{
+				{
+					Folder:   "testfolder/show",
+					Priority: 2,
+					Time:     time.Date(2026, 10, 25, 1, 0, 0, 500_000_000, time.UTC),
+				},
+				{
+					Folder:   "testfolder/show",
+					Priority: 5,
+					Time:     time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC),
+				},
+			},
+			WantScan: autoscan.Scan{
+				Folder:   "testfolder/show",
+				Priority: 5,
+				Time:     time.Date(2026, 10, 25, 1, 0, 0, 500_000_000, time.UTC),
+			},
+		},
 	}
 
 	for _, tc := range testCases {

@@ -80,7 +80,11 @@ type Processor struct {
 }
 
 func (p *Processor) Add(scans ...autoscan.Scan) error {
-	if err := p.store.Upsert(scans); err != nil {
+	return p.AddContext(context.Background(), scans...)
+}
+
+func (p *Processor) AddContext(ctx context.Context, scans ...autoscan.Scan) error {
+	if err := p.store.UpsertContext(ctx, scans); err != nil {
 		return err
 	}
 	if len(scans) > 0 {
