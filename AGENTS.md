@@ -99,7 +99,9 @@ vulnerabilities. It is not a required check, so a new advisory does not block
 unrelated PRs. Look at its result in each PR.
 
 The workflows pin each action to a commit SHA, with the version in a comment.
-If you update an action, update the SHA and the comment together.
+No bot updates them. To update an action, take the SHA of the new tag from
+`gh api repos/<owner>/<repo>/commits/<tag>`. Change the SHA and the comment
+together.
 
 `mise run build` makes a local binary in `dist/`.
 `mise run snapshot` makes the release binaries in `dist/` with goreleaser.
@@ -126,9 +128,12 @@ such as `fix/<issue>-<slug>`, runs CI only after you open a PR into `master`.
   older commit then cannot replace the image of a newer commit.
 - If you delete a branch, the `docker-cleanup` workflow removes its Docker
   tag. It uses the same script as the build.
-- If someone pushes a `v*` tag, CI publishes a GitHub release and the Docker
-  tags `<version>` and `latest`. Do not create or push tags unless the user
-  asks for a release.
+- If someone pushes a `v*` tag, the `release` job runs instead of `build`.
+  It publishes a GitHub release and the Docker tags `<version>` and
+  `latest`. Do not create or push tags unless the user asks for a release.
+- The `build` and `release` jobs share one list of steps through a YAML
+  anchor. Only the `release` job can write repository contents. Every other
+  job only reads.
 
 ## Delivery
 
