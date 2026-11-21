@@ -60,6 +60,16 @@ func TestHandler(t *testing.T) {
 			WantStatus: http.StatusBadRequest,
 		},
 		{
+			Name:       "Returns 400 for a drive-relative Windows folder",
+			Event:      Event{Type: "Download", Folders: []string{`C:TV\Show`}},
+			WantStatus: http.StatusBadRequest,
+		},
+		{
+			Name:       "Returns 400 for a Windows drive without a folder",
+			Event:      Event{Type: "Download", Folders: []string{"C:"}},
+			WantStatus: http.StatusBadRequest,
+		},
+		{
 			Name:        "Accepts Windows folders",
 			Event:       Event{Type: "Download", Folders: []string{`C:\TV\Show`, `\\server\tv\Show`}},
 			WantStatus:  http.StatusOK,

@@ -226,17 +226,22 @@ func FileEvent(eventType string, files []File) (Event, error) {
 // the separators of the input, so that rewrite rules match each folder in
 // the same form as the other paths of the event.
 
-// windowsPath reports whether p is an absolute Windows path, such as
-// C:\TV or \\server\share.
+// windowsPath reports whether p is a Windows path with a drive letter or
+// a UNC path, such as C:\TV or \\server\share.
 func windowsPath(p string) bool {
 	hasDrive := len(p) >= 2 && p[1] == ':' &&
 		('a' <= p[0] && p[0] <= 'z' || 'A' <= p[0] && p[0] <= 'Z')
 	return hasDrive || strings.HasPrefix(p, `\\`)
 }
 
-// absolutePath reports whether p is an absolute Unix or Windows path.
+// absolutePath reports whether p is an absolute Unix or Windows path. A
+// drive letter needs a separator after the colon, because C:TV and C: are
+// relative to the current folder of drive C.
 func absolutePath(p string) bool {
-	return strings.HasPrefix(p, "/") || windowsPath(p)
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return windowsPath(p) && len(p) > 2 && (p[2] == '\\' || p[2] == '/')
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.
