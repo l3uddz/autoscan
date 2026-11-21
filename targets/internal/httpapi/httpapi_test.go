@@ -260,3 +260,44 @@ func TestFailedRequestLogRemovesSecrets(t *testing.T) {
 		t.Errorf("log output contains a credential: %s", out)
 	}
 }
+
+func TestRequestPathKeepsBaseURLPath(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.EscapedPath()
+	}))
+	defer srv.Close()
+
+	type Test struct {
+		Name     string
+		Base     string
+		Endpoint string
+		Want     string
+	}
+
+	userinfo := strings.Replace(srv.URL, "http://", "http://user:secret@", 1)
+	var testCases = []Test{
+		{"Root", srv.URL, "", "/"},
+		{"Root with slash", srv.URL + "/", "", "/"},
+		{"Root with prefix", srv.URL + "/plex", "", "/plex/"},
+		{"Root with prefix and slash", srv.URL + "/plex/", "", "/plex/"},
+		{"Endpoint", srv.URL, "library/sections", "/library/sections"},
+		{"Endpoint with slash", srv.URL + "/", "library/sections", "/library/sections"},
+		{"Endpoint with prefix", srv.URL + "/plex", "library/sections/1/refresh", "/plex/library/sections/1/refresh"},
+		{"Endpoint with prefix and slash", srv.URL + "/plex/", "emby/System/Info", "/plex/emby/System/Info"},
+		{"Endpoint with userinfo", userinfo, "triggers/manual", "/triggers/manual"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got = ""
+			c := New(Config{BaseURL: tc.Base, Log: zerolog.Nop()})
+			if err := c.Send(http.MethodGet, tc.Endpoint, nil); err != nil {
+				t.Fatalf("Send returned %v", err)
+			}
+			if got != tc.Want {
+				t.Errorf("request path = %q, want %q", got, tc.Want)
+			}
+		})
+	}
+}
