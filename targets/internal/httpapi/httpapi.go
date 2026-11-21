@@ -203,12 +203,14 @@ func (c *Client) send(ctx context.Context, method string, query url.Values, in a
 	if err != nil {
 		return err
 	}
-	// The server accepted the request, so a failed close does not fail it.
-	defer closeBody(res.Body)
-
 	if out == nil {
+		// The server accepted the request, so a failed close does not fail it.
+		closeBody(res.Body)
 		return nil
 	}
+	// decodeJSON drains valid responses to EOF through its size limit.
+	// On decode errors or overflow, close directly without draining further.
+	defer func() { _ = res.Body.Close() }()
 	return decodeJSON(res.Body, out)
 }
 

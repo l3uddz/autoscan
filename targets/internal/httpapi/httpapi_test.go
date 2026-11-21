@@ -585,3 +585,80 @@ func TestGetJSONRejectsOversizedResponse(t *testing.T) {
 		}
 	})
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type countingBody struct {
+	r      io.Reader
+	read   int64
+	closed bool
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	b.read += int64(n)
+	return n, err
+}
+
+func (b *countingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+func TestGetJSONStopsReadingAtResponseLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		body func() io.Reader
+	}{
+		{
+			name: "Oversized JSON string",
+			body: func() io.Reader {
+				return io.MultiReader(
+					strings.NewReader(`"`),
+					strings.NewReader(strings.Repeat("a", maxResponseBytes+128<<10)),
+					strings.NewReader(`"`),
+				)
+			},
+		},
+		{
+			name: "Small JSON value with oversized tail",
+			body: func() io.Reader {
+				return io.MultiReader(
+					strings.NewReader(`{}`),
+					strings.NewReader(strings.Repeat(" ", maxResponseBytes+128<<10)),
+				)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &countingBody{r: tc.body()}
+			c := mustNew(t, Config{BaseURL: "http://example.invalid", Log: zerolog.Nop()})
+			c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       body,
+					Request:    r,
+				}, nil
+			})
+
+			var out any
+			err := c.GetJSON(t.Context(), &out)
+			if err == nil || !strings.Contains(err.Error(), "exceeds") {
+				t.Fatalf("GetJSON returned %v, want response size limit error", err)
+			}
+			if !body.closed {
+				t.Error("response body was not closed after overflow")
+			}
+			if body.read > maxResponseBytes+1 {
+				t.Errorf("read %d bytes after overflow, want at most %d", body.read, maxResponseBytes+1)
+			}
+		})
+	}
+}
