@@ -7,10 +7,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
+
+	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/targets/plex"
+	"github.com/l3uddz/autoscan/triggers/webhook"
 )
 
 var userConfigDirFunc = os.UserConfigDir
@@ -123,4 +128,106 @@ func decodeConfig(r io.Reader) (config, error) {
 	}
 
 	return c, nil
+}
+
+// validateConfig returns an error for each value of c that cannot work, and
+// a warning for each value that works but is likely a mistake. The trigger
+// and target packages check their other values when autoscan creates them.
+func validateConfig(c config) (warnings []string, err error) {
+	var errs []error
+	if c.Port < 0 || c.Port > 65535 {
+		errs = append(errs, fmt.Errorf("port %d is not between 0 and 65535", c.Port))
+	}
+	errs = append(errs, checkTriggerNames(c)...)
+
+	for _, d := range []struct {
+		name  string
+		value time.Duration
+		then  string
+	}{
+		{"minimum-age", c.MinimumAge, "autoscan uses 0"},
+		{"scan-delay", c.ScanDelay, "autoscan uses 0"},
+		{"scan-stats", c.ScanStats, "autoscan logs no scan stats"},
+	} {
+		if d.value < 0 {
+			warnings = append(warnings, fmt.Sprintf("%s is negative, so %s", d.name, d.then))
+		}
+	}
+	if (c.Auth.Username == "") != (c.Auth.Password == "") {
+		warnings = append(warnings, "authentication needs a username and a password, so the webhooks run without authentication")
+	}
+	warnings = append(warnings, verbosityWarnings(c)...)
+	for i, t := range c.Triggers.Inotify {
+		if len(t.Paths) == 0 {
+			warnings = append(warnings, fmt.Sprintf("inotify-%d has no paths, so it watches nothing", i+1))
+		}
+	}
+	for i, t := range c.Targets.Autoscan {
+		if (t.User == "") != (t.Pass == "") {
+			warnings = append(warnings, fmt.Sprintf("autoscan-%d needs a username and a password, so it sends requests without authentication", i+1))
+		}
+	}
+
+	return warnings, errors.Join(errs...)
+}
+
+// checkTriggerNames returns an error for each webhook trigger name that
+// breaks the routes below /triggers. Every -arr trigger shares those
+// routes, so a name must be unique across all types. One trigger without a
+// name is allowed: it gets the route /triggers/.
+func checkTriggerNames(c config) []error {
+	var errs []error
+	seen := make(map[string]bool)
+	for _, triggers := range [][]webhook.Config{c.Triggers.Lidarr, c.Triggers.Radarr, c.Triggers.Readarr, c.Triggers.Sonarr} {
+		for _, t := range triggers {
+			switch {
+			case seen[t.Name]:
+				errs = append(errs, fmt.Errorf("trigger name %q is used more than once", t.Name))
+			case t.Name == "manual":
+				errs = append(errs, errors.New(`trigger name "manual" is reserved for the manual trigger`))
+			case strings.ContainsAny(t.Name, "{}*"):
+				errs = append(errs, fmt.Errorf("trigger name %q contains a route pattern character: {, }, or *", t.Name))
+			}
+			seen[t.Name] = true
+		}
+	}
+	return errs
+}
+
+// verbosityWarnings returns a warning for each verbosity that is not a log
+// level. The trigger or target then uses the global log level.
+func verbosityWarnings(c config) []string {
+	type option struct{ owner, verbosity string }
+	options := []option{{"manual trigger", c.Triggers.Manual.Verbosity}}
+	for i, t := range c.Triggers.Inotify {
+		options = append(options, option{fmt.Sprintf("inotify-%d", i+1), t.Verbosity})
+	}
+	for _, triggers := range []struct {
+		kind    string
+		configs []webhook.Config
+	}{{"lidarr", c.Triggers.Lidarr}, {"radarr", c.Triggers.Radarr}, {"readarr", c.Triggers.Readarr}, {"sonarr", c.Triggers.Sonarr}} {
+		for i, t := range triggers.configs {
+			options = append(options, option{fmt.Sprintf("%s-%d", triggers.kind, i+1), t.Verbosity})
+		}
+	}
+	for i, t := range c.Targets.Autoscan {
+		options = append(options, option{fmt.Sprintf("autoscan-%d", i+1), t.Verbosity})
+	}
+	// The Plex, Emby, and Jellyfin configurations share one type.
+	for _, targets := range []struct {
+		kind    string
+		configs []plex.Config
+	}{{"plex", c.Targets.Plex}, {"emby", c.Targets.Emby}, {"jellyfin", c.Targets.Jellyfin}} {
+		for i, t := range targets.configs {
+			options = append(options, option{fmt.Sprintf("%s-%d", targets.kind, i+1), t.Verbosity})
+		}
+	}
+
+	var warnings []string
+	for _, o := range options {
+		if _, ok := autoscan.ParseVerbosity(o.verbosity); !ok && o.verbosity != "" {
+			warnings = append(warnings, fmt.Sprintf("%s: verbosity %q is not a log level, so it uses the global log level", o.owner, o.verbosity))
+		}
+	}
+	return warnings
 }

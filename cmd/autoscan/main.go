@@ -157,6 +157,15 @@ func main() {
 			Err(err).
 			Msg("Failed decoding config")
 	}
+	warnings, err := validateConfig(c)
+	for _, warning := range warnings {
+		log.Warn().Msg(warning)
+	}
+	if err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Failed checking config")
+	}
 
 	// migrator
 	mg, err := migrate.New(db, "migrations")

@@ -189,6 +189,10 @@ curl --request POST \
 You can configure more than one HTTP trigger of the same type.
 In that case, each trigger MUST have a `name` field with a unique value.
 Autoscan uses the name to create the route `/triggers/:name`.
+All -arr triggers share these routes, so a name must be unique across Lidarr, Radarr, Readarr, and Sonarr.
+Only one -arr trigger can omit the name. Its route is `/triggers/`.
+A name cannot be `manual`, and it cannot contain `{`, `}`, or `*`.
+Autoscan stops at startup if a name breaks these rules.
 
 Autoscan provides these -arrs:
 
@@ -649,8 +653,20 @@ host:
 ```
 
 Autoscan uses the value of `port` for each host entry that has no port.
+The port must be between 0 and 65535.
 Write an IPv6 address with a port in brackets, such as `[::1]:5959`. Without a port, `::1` and `[::1]` both work.
 You need the `host` field only to listen on more than one interface.
+
+### Configuration checks
+
+Autoscan checks the configuration at startup.
+If a value cannot work, such as an invalid target URL, an empty inotify `path`, or a duplicate trigger name, Autoscan stops with an error.
+If a value works but is likely a mistake, Autoscan logs a warning and starts. These values cause a warning:
+
+- A negative `minimum-age`, `scan-delay`, or `scan-stats`.
+- Only one of `username` and `password` in `authentication` or in an Autoscan target.
+- A `verbosity` that is not a log level.
+- An inotify trigger without `paths`.
 
 ## Other installation options
 

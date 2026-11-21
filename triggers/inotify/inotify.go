@@ -23,13 +23,20 @@ type Config struct {
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Include   []string           `yaml:"include"`
 	Exclude   []string           `yaml:"exclude"`
-	Paths     []struct {
-		Path    string             `yaml:"path"`
-		Rewrite []autoscan.Rewrite `yaml:"rewrite"`
-		Include []string           `yaml:"include"`
-		Exclude []string           `yaml:"exclude"`
-	} `yaml:"paths"`
+	Paths     []PathConfig       `yaml:"paths"`
 }
+
+// PathConfig is one watched path. Its rules apply before the rules of the
+// trigger.
+type PathConfig struct {
+	Path    string             `yaml:"path"`
+	Rewrite []autoscan.Rewrite `yaml:"rewrite"`
+	Include []string           `yaml:"include"`
+	Exclude []string           `yaml:"exclude"`
+}
+
+// errEmptyPath means that a path entry has no path.
+var errEmptyPath = errors.New("inotify path is empty")
 
 const (
 	// watchRetryMin and watchRetryMax limit the delay before autoscan tries
@@ -76,6 +83,9 @@ func New(c Config, callback autoscan.ProcessorFunc) (*Trigger, error) {
 
 	var paths []*path
 	for _, p := range c.Paths {
+		if p.Path == "" {
+			return nil, errEmptyPath
+		}
 		rewriter, err := autoscan.NewRewriter(append(p.Rewrite, c.Rewrite...))
 		if err != nil {
 			return nil, err
