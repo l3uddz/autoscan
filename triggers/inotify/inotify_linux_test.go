@@ -5,6 +5,7 @@ package inotify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -427,29 +428,49 @@ func TestDrainErrorsDoesNotBlockOnErrorSend(t *testing.T) {
 	}
 }
 
-func TestTakeWatchedBelowSkipsUntrackedFiles(t *testing.T) {
-	trigger := &Trigger{}
-	trigger.recordWatch("/mnt/tv")
-	trigger.recordWatch("/mnt/tv/Show")
-	trigger.recordWatch("/mnt/tv/Show/Season 1")
+func TestRemoveWatchedBelowSkipsUntrackedFilesAndCleansDescendants(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	season := filepath.Join(show, "Season 1")
+	gapParent := filepath.Join(root, "Gap")
+	gapChild := filepath.Join(gapParent, "Nested")
+	mkdirAll(t, season)
+	mkdirAll(t, gapChild)
 
-	if removed := trigger.takeWatchedBelow("/mnt/tv/Show/Season 1/episode.mkv", false); len(removed) != 0 {
-		t.Errorf("takeWatchedBelow(file) = %v, want nil", removed)
+	trigger := newTestTrigger(t, root)
+	for _, dir := range []string{root, show, season, gapChild} {
+		if err := trigger.watchDir(dir); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	removed := trigger.takeWatchedBelow("/mnt/tv/Show", false)
-	slices.Sort(removed)
-	if want := []string{"/mnt/tv/Show", "/mnt/tv/Show/Season 1"}; !slices.Equal(removed, want) {
-		t.Errorf("takeWatchedBelow(dir) = %v, want %v", removed, want)
+	// Removing an untracked file path leaves all directory watches intact.
+	trigger.removeWatchedBelow(filepath.Join(season, "episode.mkv"))
+	assertWatched(t, trigger, root, show, season, gapChild)
+
+	// Removing a watched directory removes it and its descendants, leaving root.
+	trigger.removeWatchedBelow(show)
+	assertWatched(t, trigger, root, gapChild)
+	for _, name := range trigger.watcher.WatchList() {
+		if isWithin(name, show) {
+			t.Errorf("watch %q below removed dir remains", name)
+		}
 	}
-	if _, still := trigger.watched["/mnt/tv"]; !still {
-		t.Error("parent root watch was unexpectedly removed")
+
+	// Removing an unwatched ancestor still cleans up watched descendants below it.
+	trigger.removeWatchedBelow(gapParent)
+	assertWatched(t, trigger, root)
+	for _, name := range trigger.watcher.WatchList() {
+		if isWithin(name, gapParent) {
+			t.Errorf("descendant watch %q below unwatched ancestor remains", name)
+		}
 	}
 }
 
-func TestTriggerRunFlushesPendingScansOnCancel(t *testing.T) {
+func TestTriggerRunFlushesPendingScansWhenCreateWalkStalls(t *testing.T) {
 	root := t.TempDir()
 	show := filepath.Join(root, "Show")
+	stalled := filepath.Join(root, "Stalled")
 	mkdirAll(t, show)
 
 	flushed := make(chan autoscan.Scan, 4)
@@ -466,6 +487,16 @@ func TestTriggerRunFlushesPendingScansOnCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	walkStarted := make(chan struct{})
+	releaseWalk := make(chan struct{})
+	trigger.walkDir = func(dir string, fn fs.WalkDirFunc) error {
+		if dir == stalled {
+			close(walkStarted)
+			<-releaseWalk
+		}
+		return filepath.WalkDir(dir, fn)
+	}
+
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
@@ -477,11 +508,164 @@ func TestTriggerRunFlushesPendingScansOnCancel(t *testing.T) {
 		return trigger.Status().Watching == 1
 	})
 
-	// Write a file so an event enters the 10s debounce queue, then cancel
-	// before queueDelay elapses to verify Run flushes on shutdown.
+	// Queue a scan from a healthy folder, then create a directory whose walk
+	// stalls. Once walkStarted closes, the worker has already enqueued show
+	// on the unbuffered queue channel and is now blocked inside handleCreate.
 	writeFile(t, filepath.Join(show, "episode.mkv"))
-	// Give fsnotify + worker a moment to enqueue the path into the debounce map.
-	time.Sleep(150 * time.Millisecond)
+	mkdirAll(t, stalled)
+	select {
+	case <-walkStarted:
+	case <-time.After(2 * time.Second):
+		close(releaseWalk)
+		cancel()
+		t.Fatal("create-event walk did not start")
+	}
+
+	// Cancel while the create-event walk is still blocked; pending scans must
+	// flush immediately instead of waiting for the stalled worker.
+	cancel()
+	select {
+	case scan := <-flushed:
+		if scan.Folder != show || scan.Priority != 2 {
+			t.Errorf("flushed scan = %+v, want folder %q priority 2", scan, show)
+		}
+	case <-time.After(2 * time.Second):
+		close(releaseWalk)
+		t.Fatal("pending scan was not flushed while create-event walk was stalled")
+	}
+
+	close(releaseWalk)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Trigger.Run did not exit after stalled walk unblocked")
+	}
+}
+
+func TestConcurrentWatchDirAndRenameLeavesNoStaleWatches(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	d := newWatchingDaemon(t, root)
+
+	errDone := make(chan struct{})
+	go func() {
+		defer close(errDone)
+		d.drainErrors()
+	}()
+	t.Cleanup(func() {
+		_ = d.watcher.Close()
+		<-errDone
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-d.watcher.Events:
+				if !ok {
+					return
+				}
+				d.rewatchLostRoot(event, func(*path) {})
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-eventsDone
+	})
+
+	for i := range 20 {
+		name := fmt.Sprintf("Show-%d", i)
+		parent := filepath.Join(root, name)
+		child := filepath.Join(parent, "Season 1")
+		mkdirAll(t, child)
+		if err := d.watchDir(parent); err != nil {
+			t.Fatal(err)
+		}
+
+		// Register the child watch concurrently with renaming its parent out of
+		// the root while the live event loop runs rewatchLostRoot.
+		regDone := make(chan struct{})
+		go func() {
+			defer close(regDone)
+			_ = d.watchDir(child)
+		}()
+		rename(t, parent, filepath.Join(outside, name))
+		<-regDone
+
+		waitFor(t, 2*time.Second, "watches below renamed parent to clear", func() bool {
+			for _, watched := range d.watcher.WatchList() {
+				if isWithin(watched, parent) {
+					return false
+				}
+			}
+			return true
+		})
+
+		d.watchedMu.Lock()
+		for watched := range d.watched {
+			if isWithin(watched, parent) {
+				d.watchedMu.Unlock()
+				t.Fatalf("iteration %d: stale index entry %q remains below renamed parent", i, watched)
+			}
+		}
+		d.watchedMu.Unlock()
+	}
+}
+
+func TestTriggerRunFlushesPendingScansOnCancel(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	syncDir := filepath.Join(root, "Sync")
+	mkdirAll(t, show)
+
+	flushed := make(chan autoscan.Scan, 4)
+	trigger, err := New(Config{
+		Priority: 2,
+		Paths:    []PathConfig{{Path: root}},
+	}, func(scans ...autoscan.Scan) error {
+		for _, s := range scans {
+			flushed <- s
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Creating syncDir after writing episode.mkv places its Create event after
+	// episode.mkv in the inotify FIFO. Once walkDir starts for syncDir, the
+	// worker has already completed the unbuffered send of show into the queue.
+	enqueued := make(chan struct{})
+	trigger.walkDir = func(dir string, fn fs.WalkDirFunc) error {
+		if dir == syncDir {
+			close(enqueued)
+		}
+		return filepath.WalkDir(dir, fn)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		trigger.Run(ctx)
+	}()
+
+	waitFor(t, 2*time.Second, "root to be watched", func() bool {
+		return trigger.Status().Watching == 1
+	})
+
+	writeFile(t, filepath.Join(show, "episode.mkv"))
+	mkdirAll(t, syncDir)
+	select {
+	case <-enqueued:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for file event to enter the debounce queue")
+	}
 
 	cancel()
 	select {

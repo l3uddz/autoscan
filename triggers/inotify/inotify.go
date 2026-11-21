@@ -60,8 +60,11 @@ type Trigger struct {
 	callback autoscan.ProcessorFunc
 	priority int
 
-	watchedMu sync.RWMutex
-	watched   map[string]struct{}
+	watchedMu       sync.Mutex
+	watched         map[string]struct{}
+	watchedSubtrees map[string]int
+
+	walkDir func(string, fs.WalkDirFunc) error
 }
 
 type path struct {
@@ -141,7 +144,7 @@ func (t *Trigger) Run(ctx context.Context) {
 	}) {
 		return
 	}
-	t.queue = newQueue(t.callback, t.log, t.priority)
+	t.queue = newQueue(ctx, t.callback, t.log, t.priority)
 
 	// Drain watcher errors independently of event handling: fsnotify can
 	// send on the unbuffered Errors channel while holding its internal mutex,
@@ -160,8 +163,6 @@ func (t *Trigger) Run(ctx context.Context) {
 	}
 
 	t.worker(ctx, startWatch)
-	// Flush pending scans as soon as event intake stops, so a stalled
-	// filesystem walk cannot delay saving scans from healthy roots.
 	t.queue.stop()
 	if err := t.watcher.Close(); err != nil {
 		t.log.Warn().Err(err).Msg("Failed closing filesystem watcher")
@@ -258,8 +259,12 @@ func retry(ctx context.Context, log zerolog.Logger, msg string, path string, try
 // The inotify watch limit fails the walk, because a retry can succeed after
 // the user raises the limit.
 func (t *Trigger) watchTree(ctx context.Context, root string) (bool, error) {
+	walk := t.walkDir
+	if walk == nil {
+		walk = filepath.WalkDir
+	}
 	hasFile := false
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := walk(root, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -283,50 +288,78 @@ func (t *Trigger) watchTree(ctx context.Context, root string) (bool, error) {
 	return hasFile, err
 }
 
-// watchDir adds a watch for the directory at path.
+// watchDir adds a watch for the directory at path. It holds watchedMu across
+// watcher.Add and updating the index so concurrent rename cleanup never misses
+// a newly registered watch.
 func (t *Trigger) watchDir(path string) error {
-	if err := t.watcher.Add(path); err != nil {
+	clean := filepath.Clean(path)
+	t.watchedMu.Lock()
+	err := t.watcher.Add(clean)
+	if err == nil {
+		t.addWatched(clean)
+	}
+	t.watchedMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("watch directory: %w", err)
 	}
-	t.recordWatch(path)
 
 	t.log.Trace().
-		Str("path", path).
+		Str("path", clean).
 		Msg("Watching directory")
 	return nil
 }
 
-func (t *Trigger) recordWatch(dir string) {
-	clean := filepath.Clean(dir)
-	t.watchedMu.Lock()
+func (t *Trigger) addWatched(clean string) {
 	if t.watched == nil {
 		t.watched = make(map[string]struct{})
+		t.watchedSubtrees = make(map[string]int)
+	}
+	if _, exists := t.watched[clean]; exists {
+		return
 	}
 	t.watched[clean] = struct{}{}
-	t.watchedMu.Unlock()
+	t.adjustSubtreeCounts(clean, 1)
 }
 
-// takeWatchedBelow removes and returns all watched directories at or below
-// lost. An ordinary file path not in t.watched returns nil in O(1) without
-// scanning the watch list or locking fsnotify unless forceScan is true (for
-// example when an ancestor above a configured root is removed or renamed).
-func (t *Trigger) takeWatchedBelow(lost string, forceScan bool) []string {
+func (t *Trigger) deleteWatched(clean string) {
+	if _, exists := t.watched[clean]; !exists {
+		return
+	}
+	delete(t.watched, clean)
+	t.adjustSubtreeCounts(clean, -1)
+}
+
+func (t *Trigger) adjustSubtreeCounts(dir string, delta int) {
+	for cur := dir; ; {
+		if next := t.watchedSubtrees[cur] + delta; next <= 0 {
+			delete(t.watchedSubtrees, cur)
+		} else {
+			t.watchedSubtrees[cur] = next
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return
+		}
+		cur = parent
+	}
+}
+
+// removeWatchedBelow removes all watched directories at or below lost from the
+// index and the watcher. An ordinary file path with no watches at or below it
+// returns in O(1) without scanning the watch index or locking fsnotify.
+func (t *Trigger) removeWatchedBelow(lost string) {
 	t.watchedMu.Lock()
 	defer t.watchedMu.Unlock()
 
-	if !forceScan {
-		if _, ok := t.watched[lost]; !ok {
-			return nil
-		}
+	if t.watchedSubtrees[lost] == 0 {
+		return
 	}
-	var removed []string
 	for name := range t.watched {
 		if isWithin(name, lost) {
-			delete(t.watched, name)
-			removed = append(removed, name)
+			t.deleteWatched(name)
+			_ = t.watcher.Remove(name)
 		}
 	}
-	return removed
 }
 
 // walkError returns what the walk of watchTree does after err at path. It
@@ -425,12 +458,7 @@ func (t *Trigger) rewatchLostRoot(event fsnotify.Event, startWatch func(*path)) 
 	// inodes under their old paths. Remove them for any renamed or removed
 	// watched directory so moved trees get fresh watches and do not leak.
 	lost := filepath.Clean(event.Name)
-	hasLostRoot := slices.ContainsFunc(t.paths, func(p *path) bool {
-		return isWithin(filepath.Clean(p.Path), lost)
-	})
-	for _, name := range t.takeWatchedBelow(lost, hasLostRoot) {
-		_ = t.watcher.Remove(name)
-	}
+	t.removeWatchedBelow(lost)
 
 	for _, p := range t.paths {
 		if !isWithin(filepath.Clean(p.Path), lost) {
@@ -542,6 +570,12 @@ const (
 
 	queueRetryMin = time.Second
 	queueRetryMax = time.Minute
+
+	// flushRetryTimeout and flushRetryDelay bound how long shutdown retries a
+	// failed final flush (for example, a transient SQLite lock while active
+	// deliveries finish) before giving up so shutdown stays within its budget.
+	flushRetryTimeout = 2 * time.Second
+	flushRetryDelay   = 100 * time.Millisecond
 )
 
 type pendingScan struct {
@@ -560,7 +594,7 @@ type queue struct {
 	scans    map[string]pendingScan
 }
 
-func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queue {
+func newQueue(ctx context.Context, cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queue {
 	q := &queue{
 		callback: cb,
 		log:      log,
@@ -570,7 +604,7 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 		scans:    make(map[string]pendingScan),
 	}
 
-	go q.worker()
+	go q.worker(ctx)
 
 	return q
 }
@@ -580,29 +614,39 @@ func (q *queue) stop() {
 	<-q.done
 }
 
-func (q *queue) worker() {
+// worker debounces incoming paths and flushes pending scans as soon as ctx
+// ends or inputs closes, so a stalled filesystem walk in the event worker
+// cannot delay saving scans from healthy roots during shutdown.
+func (q *queue) worker(ctx context.Context) {
 	defer close(q.done)
 	ticker := time.NewTicker(queueInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-ctx.Done():
+			q.flush()
+			return
+
 		case path, ok := <-q.inputs:
 			if !ok {
 				q.flush()
 				return
 			}
-
-			scan := q.scans[path]
-			// A new event restarts the normal wait without shortening a retry.
-			if readyAt := time.Now().Add(queueDelay); readyAt.After(scan.readyAt) {
-				scan.readyAt = readyAt
-				q.scans[path] = scan
-			}
+			q.enqueue(path)
 
 		case <-ticker.C:
 			q.process()
 		}
+	}
+}
+
+func (q *queue) enqueue(path string) {
+	scan := q.scans[path]
+	// A new event restarts the normal wait without shortening a retry.
+	if readyAt := time.Now().Add(queueDelay); readyAt.After(scan.readyAt) {
+		scan.readyAt = readyAt
+		q.scans[path] = scan
 	}
 }
 
@@ -621,19 +665,27 @@ func (q *queue) flush() {
 		})
 	}
 
-	if err := q.callback(scans...); err != nil {
-		q.log.Error().
-			Err(err).
-			Int("count", len(scans)).
-			Msg("Failed flushing pending scans to processor during shutdown")
-		return
-	}
-
-	clear(q.scans)
-	for _, scan := range scans {
-		q.log.Info().
-			Str("path", scan.Folder).
-			Msg("Scan flushed to processor")
+	deadline := time.Now().Add(flushRetryTimeout)
+	for {
+		err := q.callback(scans...)
+		if err == nil {
+			clear(q.scans)
+			for _, scan := range scans {
+				q.log.Info().
+					Str("path", scan.Folder).
+					Msg("Scan flushed to processor")
+			}
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			q.log.Error().
+				Err(err).
+				Int("count", len(scans)).
+				Msg("Failed flushing pending scans to processor during shutdown")
+			return
+		}
+		time.Sleep(min(flushRetryDelay, remaining))
 	}
 }
 

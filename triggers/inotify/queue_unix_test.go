@@ -24,8 +24,8 @@ func cpuTime(t *testing.T) time.Duration {
 }
 
 func TestQueueIdlesWhileScanWaits(t *testing.T) {
-	q := newQueue(func(...autoscan.Scan) error { return nil }, zerolog.Nop(), 0)
-	defer close(q.inputs)
+	q := newQueue(t.Context(), func(...autoscan.Scan) error { return nil }, zerolog.Nop(), 0)
+	defer q.stop()
 
 	// The scan waits for the queue delay, which is longer than the window.
 	q.inputs <- "/mnt/media/show"
