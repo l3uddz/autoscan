@@ -83,16 +83,17 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
-			"Returns 200 for a Windows drive root with a forward slash",
+			"Returns 200 for a Windows drive root and UNC paths",
 			Given{
 				Config: Config{},
-				Query:  url.Values{"dir": []string{"C:/", `\\server\media\Show\`}},
+				Query:  url.Values{"dir": []string{"C:/", `\\server\media\Show\`, `\\server/media/Show/`}},
 			},
 			Expected{
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{Folder: "C:/"},
 					{Folder: `\\server\media\Show`},
+					{Folder: `\\server/media/Show`},
 				},
 			},
 		},

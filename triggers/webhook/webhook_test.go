@@ -320,6 +320,8 @@ func TestCleanFolder(t *testing.T) {
 		`\\server\media\..\tv\Show\`:    `\\server\media\tv\Show`,
 		`\\server\media\Show\..\Other\`: `\\server\media\Other`,
 		`\\server\media\Show\..`:        `\\server\media`,
+		`\\server/media/Show/`:          `\\server/media/Show`,
+		`\\server/media/../tv/Show/`:    `\\server/media/tv/Show`,
 	} {
 		if got := CleanFolder(dir); got != want {
 			t.Errorf("CleanFolder(%q) = %q, want %q", dir, got, want)

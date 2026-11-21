@@ -264,8 +264,13 @@ func CleanFolder(dir string) string {
 }
 
 // cleanUNC cleans the path suffix below a \\server\share UNC volume root so
-// ".." cannot escape the share.
+// ".." cannot escape the share. It keeps forward slashes when the path after
+// the leading "\\" uses only forward slashes.
 func cleanUNC(dir string) string {
+	sep := `\`
+	if !strings.Contains(dir[2:], `\`) {
+		sep = "/"
+	}
 	rest := strings.ReplaceAll(dir[2:], `\`, "/")
 	server, afterServer, hasShare := strings.Cut(rest, "/")
 	if server == "" || !hasShare {
@@ -275,7 +280,7 @@ func cleanUNC(dir string) string {
 	if share == "" {
 		return dir
 	}
-	root := `\\` + server + `\` + share
+	root := `\\` + server + sep + share
 	if !hasSuffix || suffix == "" {
 		return root
 	}
@@ -283,7 +288,10 @@ func cleanUNC(dir string) string {
 	if cleaned == "/" {
 		return root
 	}
-	return root + strings.ReplaceAll(cleaned, "/", `\`)
+	if sep == `\` {
+		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	return root + cleaned
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.
