@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -498,9 +499,12 @@ func TestRedirectOnSameHostIsFollowed(t *testing.T) {
 }
 
 func TestSendReusesKeepAliveConnection(t *testing.T) {
+	var mu sync.Mutex
 	var addrs []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		addrs = append(addrs, r.RemoteAddr)
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ServerName":"Emby","Version":"4.8.0"}`))
 	}))
@@ -513,8 +517,11 @@ func TestSendReusesKeepAliveConnection(t *testing.T) {
 			t.Fatalf("Send returned %v", err)
 		}
 	}
-	if len(addrs) != 2 || addrs[0] != addrs[1] {
-		t.Errorf("Remote addresses = %v, want one reused keep-alive connection", addrs)
+	mu.Lock()
+	got := append([]string(nil), addrs...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != got[1] {
+		t.Errorf("Remote addresses = %v, want one reused keep-alive connection", got)
 	}
 }
 
@@ -554,6 +561,27 @@ func TestGetJSONRejectsOversizedResponse(t *testing.T) {
 		}
 		if errors.Is(err, autoscan.ErrTargetUnavailable) {
 			t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized response: %v", err)
+		}
+	})
+
+	t.Run("Rejects small JSON value with oversized tail", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{}`))
+			chunk := strings.Repeat(" ", 64<<10)
+			for written := 2; written <= maxResponseBytes; written += len(chunk) {
+				_, _ = w.Write([]byte(chunk))
+			}
+		}))
+		defer srv.Close()
+
+		c := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()})
+		var out struct{}
+		err := c.GetJSON(t.Context(), &out)
+		if err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("GetJSON returned %v, want a response size limit error", err)
+		}
+		if errors.Is(err, autoscan.ErrTargetUnavailable) {
+			t.Errorf("GetJSON returned ErrTargetUnavailable for an oversized tail: %v", err)
 		}
 	})
 }

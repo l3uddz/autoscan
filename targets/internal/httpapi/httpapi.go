@@ -226,6 +226,15 @@ func decodeJSON(r io.Reader, out any) error {
 	if err != nil {
 		return bodyError("decoding response", err)
 	}
+	// Decode stops after the first JSON value. Drain the rest through the same
+	// limiter so a small value with an oversized tail also fails and trailing
+	// whitespace does not prevent keep-alive reuse.
+	if _, err := io.Copy(io.Discard, limited); err != nil {
+		return bodyError("reading response", err)
+	}
+	if limited.N == 0 {
+		return fmt.Errorf("decoding response: response exceeds %d bytes", maxResponseBytes)
+	}
 	return nil
 }
 
