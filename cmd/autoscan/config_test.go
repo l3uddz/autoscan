@@ -167,6 +167,11 @@ func TestValidateConfig(t *testing.T) {
 			YAML: "triggers:\n  sonarr:\n    - priority: 1\n",
 		},
 		{
+			Name:    "Empty host list",
+			YAML:    "host: []\n",
+			WantErr: "host must contain at least one address",
+		},
+		{
 			Name:    "Port out of range",
 			YAML:    "port: 70000\n",
 			WantErr: "port",
@@ -190,6 +195,16 @@ func TestValidateConfig(t *testing.T) {
 			Name:    "Trigger name below the manual route",
 			YAML:    "triggers:\n  sonarr:\n    - name: manual/\n",
 			WantErr: `trigger name "manual/" is reserved`,
+		},
+		{
+			Name:    "Trigger name nested under manual",
+			YAML:    "triggers:\n  sonarr:\n    - name: manual/extra\n",
+			WantErr: `trigger name "manual/extra" is reserved`,
+		},
+		{
+			Name:    "Trigger name starting with slash",
+			YAML:    "triggers:\n  sonarr:\n    - name: /sonarr\n",
+			WantErr: `trigger name "/sonarr" must not start with /`,
 		},
 		{
 			Name:    "Trigger name with a route pattern",

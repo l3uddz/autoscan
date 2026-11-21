@@ -159,6 +159,9 @@ func decodeConfig(r io.Reader) (config, error) {
 // and target packages check their other values when autoscan creates them.
 func validateConfig(c config) (warnings []string, err error) {
 	var errs []error
+	if len(c.Host) == 0 {
+		errs = append(errs, errors.New("host must contain at least one address"))
+	}
 	if c.Port < 0 || c.Port > 65535 {
 		errs = append(errs, fmt.Errorf("port %d is not between 0 and 65535", c.Port))
 	}
@@ -207,7 +210,9 @@ func checkTriggerNames(c config) []error {
 			switch {
 			case seen[t.Name]:
 				errs = append(errs, fmt.Errorf("trigger name %q is used more than once", t.Name))
-			case t.Name == "manual" || t.Name == "manual/":
+			case strings.HasPrefix(t.Name, "/"):
+				errs = append(errs, fmt.Errorf("trigger name %q must not start with /", t.Name))
+			case t.Name == "manual" || strings.HasPrefix(t.Name, "manual/"):
 				errs = append(errs, fmt.Errorf("trigger name %q is reserved for the manual trigger", t.Name))
 			case strings.ContainsAny(t.Name, "{}*"):
 				errs = append(errs, fmt.Errorf("trigger name %q contains a route pattern character: {, }, or *", t.Name))

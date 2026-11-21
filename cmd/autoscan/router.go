@@ -84,18 +84,20 @@ func getRouter(c config, proc *processor.Processor, watchers []*inotify.Trigger)
 }
 
 // addTriggers registers a POST route for each -arr trigger configuration.
-// The route is the trigger name. It stops at the first trigger that fails.
+// The route is the trigger name.
 func addTriggers(r chi.Router, callback autoscan.ProcessorFunc, configs []webhook.Config, create func(webhook.Config, autoscan.ProcessorFunc) (http.Handler, error)) error {
+	var errs []error
 	for _, c := range configs {
 		handler, err := create(c, callback)
 		if err != nil {
-			return fmt.Errorf("trigger %s: %w", c.Name, err)
+			errs = append(errs, fmt.Errorf("trigger %s: %w", c.Name, err))
+			continue
 		}
 
 		r.Post("/"+c.Name, handler.ServeHTTP)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // Other Handlers

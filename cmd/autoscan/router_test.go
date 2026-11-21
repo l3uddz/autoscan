@@ -56,10 +56,14 @@ func TestRouterReturnsTriggerError(t *testing.T) {
 	proc, _ := newRouterTestProcessor(t, processor.Config{})
 
 	var c config
-	c.Triggers.Sonarr = []sonarr.Config{{Name: "sonarr", Rewrite: []autoscan.Rewrite{{From: "("}}}}
+	c.Triggers.Sonarr = []sonarr.Config{
+		{Name: "sonarr", Rewrite: []autoscan.Rewrite{{From: "("}}},
+		{Name: "sonarr4k", Rewrite: []autoscan.Rewrite{{From: "["}}},
+	}
 
-	if _, err := getRouter(c, proc, nil); err == nil || !strings.Contains(err.Error(), "trigger sonarr") {
-		t.Fatalf("getRouter error = %v, want an error that names the sonarr trigger", err)
+	_, err := getRouter(c, proc, nil)
+	if err == nil || !strings.Contains(err.Error(), "trigger sonarr") || !strings.Contains(err.Error(), "trigger sonarr4k") {
+		t.Fatalf("getRouter error = %v, want errors naming both sonarr and sonarr4k", err)
 	}
 }
 
