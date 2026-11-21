@@ -8,12 +8,8 @@ import (
 	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
-type Config struct {
-	URL       string             `yaml:"url"`
-	Token     string             `yaml:"token"`
-	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
-	Verbosity string             `yaml:"verbosity"`
-}
+// Config is the configuration of a Jellyfin target.
+type Config = media.Config
 
 func New(ctx context.Context, c Config) (autoscan.Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().

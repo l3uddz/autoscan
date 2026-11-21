@@ -13,6 +13,14 @@ import (
 	"github.com/l3uddz/autoscan/targets/internal/httpapi"
 )
 
+// Config is the configuration of a Plex, Emby, or Jellyfin target.
+type Config struct {
+	URL       string             `yaml:"url"`
+	Token     string             `yaml:"token"`
+	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
+	Verbosity string             `yaml:"verbosity"`
+}
+
 // A Library is one folder of a media server library.
 // ID is the Plex section ID. Emby and Jellyfin do not use it.
 type Library struct {

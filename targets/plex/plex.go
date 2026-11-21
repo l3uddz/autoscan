@@ -13,12 +13,8 @@ import (
 	"github.com/l3uddz/autoscan/targets/internal/media"
 )
 
-type Config struct {
-	URL       string             `yaml:"url"`
-	Token     string             `yaml:"token"`
-	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
-	Verbosity string             `yaml:"verbosity"`
-}
+// Config is the configuration of a Plex target.
+type Config = media.Config
 
 type target struct {
 	libraries *media.LibraryList
