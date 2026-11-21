@@ -69,6 +69,8 @@ func New(c Config) (*Client, error) {
 
 // parseBaseURL parses the base URL of a target. A path prefix, such as
 // the path of a reverse proxy, and a user name with password are allowed.
+// A port without a host name, such as http://:32400, is allowed too,
+// because Go then dials the local system.
 // The errors do not contain the URL, because it can contain credentials.
 func parseBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)

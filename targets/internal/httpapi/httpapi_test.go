@@ -286,6 +286,8 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 	}
 
 	userinfo := strings.Replace(srv.URL, "http://", "http://user:secret@", 1)
+	// Go dials the local system for an empty host, so a port-only URL works.
+	portOnly := "http://" + srv.URL[strings.LastIndex(srv.URL, ":"):]
 	var testCases = []Test{
 		{"Root", srv.URL, []string{"/"}, "/"},
 		{"Root with slash", srv.URL + "/", []string{"/"}, "/"},
@@ -296,6 +298,7 @@ func TestRequestPathKeepsBaseURLPath(t *testing.T) {
 		{"Endpoint with prefix", srv.URL + "/plex", []string{"library", "sections", "1", "refresh"}, "/plex/library/sections/1/refresh"},
 		{"Endpoint with prefix and slash", srv.URL + "/plex/", []string{"emby", "System", "Info"}, "/plex/emby/System/Info"},
 		{"Endpoint with userinfo", userinfo, []string{"triggers", "manual"}, "/triggers/manual"},
+		{"Endpoint with port only", portOnly, []string{"library", "sections"}, "/library/sections"},
 	}
 
 	for _, tc := range testCases {
