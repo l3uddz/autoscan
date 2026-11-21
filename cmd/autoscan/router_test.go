@@ -62,7 +62,7 @@ func TestRouterReturnsTriggerError(t *testing.T) {
 	}
 
 	_, err := getRouter(c, proc, nil)
-	if err == nil || !strings.Contains(err.Error(), "trigger sonarr") || !strings.Contains(err.Error(), "trigger sonarr4k") {
+	if err == nil || !strings.Contains(err.Error(), "trigger sonarr:") || !strings.Contains(err.Error(), "trigger sonarr4k:") {
 		t.Fatalf("getRouter error = %v, want errors naming both sonarr and sonarr4k", err)
 	}
 }
