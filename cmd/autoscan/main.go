@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -317,16 +319,22 @@ func newLogger(path string, verbosity int) zerolog.Logger {
 	}
 }
 
+// listenAddr returns the listen address for a host entry. An entry without
+// a port, such as "127.0.0.1", "::1" or "[::1]", gets port.
+func listenAddr(host string, port int) string {
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
+}
+
 // startServers serves handler on each host in the background and returns
 // the servers. A host without a port uses port. Autoscan stops if a server
 // fails.
 func startServers(hosts []string, port int, handler http.Handler) []*http.Server {
 	servers := make([]*http.Server, 0, len(hosts))
 	for _, host := range hosts {
-		addr := host
-		if !strings.Contains(addr, ":") {
-			addr = fmt.Sprintf("%s:%d", host, port)
-		}
+		addr := listenAddr(host, port)
 
 		srv := &http.Server{
 			Addr:              addr,
