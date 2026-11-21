@@ -160,71 +160,48 @@ func (d *yamlDuration) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// decodeConfig decodes the YAML configuration in r over the default values.
-// It returns an error for a key that config does not define. Explicit YAML
-// nulls zero the corresponding defaulted fields, matching yaml.v2 behavior.
+// decodeConfig decodes the YAML configuration in r and applies default values
+// only for top-level keys absent from the effective mapping after YAML merge
+// resolution. Explicit YAML nulls (direct or merged via <<) keep the field's
+// zero value, matching yaml.v2 behavior.
 func decodeConfig(r io.Reader) (config, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
 		return config{}, err
 	}
 
-	c := config{
-		MinimumAge: yamlDuration(10 * time.Minute),
-		ScanDelay:  yamlDuration(5 * time.Second),
-		ScanStats:  yamlDuration(1 * time.Hour),
-		Host:       []string{""},
-		Port:       3030,
-	}
-
+	var c config
 	decoder := yaml.NewDecoder(bytes.NewReader(raw))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil {
 		return config{}, err
 	}
 
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	var fields map[string]yaml.Node
+	if err := yaml.NewDecoder(bytes.NewReader(raw)).Decode(&fields); err != nil {
 		return config{}, err
 	}
-	applyExplicitNulls(&doc, &c)
+	applyConfigDefaults(&c, fields)
 
 	return c, nil
 }
 
-// applyExplicitNulls zeroes defaulted top-level fields that the YAML document
-// explicitly sets to null (such as "scan-stats:" or "minimum-age: null").
-// yaml.v3 leaves pre-initialized struct fields untouched on null, whereas
-// yaml.v2 zeroed them.
-func applyExplicitNulls(doc *yaml.Node, c *config) {
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return
+func applyConfigDefaults(c *config, fields map[string]yaml.Node) {
+	if _, ok := fields["minimum-age"]; !ok {
+		c.MinimumAge = yamlDuration(10 * time.Minute)
 	}
-	mapping := doc.Content[0].Content
-	for i := 0; i+1 < len(mapping); i += 2 {
-		if !isNullNode(mapping[i+1]) {
-			continue
-		}
-		switch mapping[i].Value {
-		case "minimum-age":
-			c.MinimumAge = 0
-		case "scan-delay":
-			c.ScanDelay = 0
-		case "scan-stats":
-			c.ScanStats = 0
-		case "port":
-			c.Port = 0
-		case "host":
-			c.Host = nil
-		}
+	if _, ok := fields["scan-delay"]; !ok {
+		c.ScanDelay = yamlDuration(5 * time.Second)
 	}
-}
-
-func isNullNode(n *yaml.Node) bool {
-	if n.Kind == yaml.AliasNode && n.Alias != nil {
-		n = n.Alias
+	if _, ok := fields["scan-stats"]; !ok {
+		c.ScanStats = yamlDuration(1 * time.Hour)
 	}
-	return n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null"
+	if _, ok := fields["host"]; !ok {
+		c.Host = []string{""}
+	}
+	if _, ok := fields["port"]; !ok {
+		c.Port = 3030
+	}
 }
 
 // validateConfig returns an error for each value of c that cannot work, and

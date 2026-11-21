@@ -155,6 +155,77 @@ func TestDecodeConfigZeroesExplicitNulls(t *testing.T) {
 	}
 }
 
+func TestDecodeConfigResolvesMergedNulls(t *testing.T) {
+	t.Run("Merged nulls zero defaults while omitted keys keep defaults", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<: {port: null, scan-stats: null}\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 0 || time.Duration(c.ScanStats) != 0 {
+			t.Errorf("merged nulls = (port=%d, scan-stats=%v), want (0, 0s)", c.Port, time.Duration(c.ScanStats))
+		}
+		if time.Duration(c.MinimumAge) != 10*time.Minute || time.Duration(c.ScanDelay) != 5*time.Second || !slices.Equal(c.Host, []string{""}) {
+			t.Errorf("omitted defaults = (%v, %v, %q), want (10m, 5s, [\"\"])",
+				time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), c.Host)
+		}
+	})
+
+	t.Run("Merged nulls zero every defaulted field", func(t *testing.T) {
+		const input = "<<: {minimum-age: null, scan-delay: null, scan-stats: null, port: null, host: null}\n"
+		c, err := decodeConfig(strings.NewReader(input))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if time.Duration(c.MinimumAge) != 0 || time.Duration(c.ScanDelay) != 0 || time.Duration(c.ScanStats) != 0 {
+			t.Errorf("durations = (%v, %v, %v), want all 0",
+				time.Duration(c.MinimumAge), time.Duration(c.ScanDelay), time.Duration(c.ScanStats))
+		}
+		if c.Port != 0 || c.Host != nil {
+			t.Errorf("port and host = (%d, %q), want (0, nil)", c.Port, c.Host)
+		}
+	})
+
+	t.Run("Direct value overrides merged null", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<: {port: null}\nport: 4040\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 4040 {
+			t.Errorf("port = %d, want 4040", c.Port)
+		}
+	})
+
+	t.Run("Direct null overrides merged value", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<: {port: 4040}\nport: null\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 0 {
+			t.Errorf("port = %d, want 0", c.Port)
+		}
+	})
+
+	t.Run("Earlier merged null in sequence overrides later merged value", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("<<:\n  - {port: null}\n  - {port: 4040}\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if c.Port != 0 {
+			t.Errorf("port = %d, want 0", c.Port)
+		}
+	})
+
+	t.Run("Merged alias to null zeroes default", func(t *testing.T) {
+		c, err := decodeConfig(strings.NewReader("scan-delay: &off null\n<<:\n  port: *off\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig returned %v", err)
+		}
+		if time.Duration(c.ScanDelay) != 0 || c.Port != 0 {
+			t.Errorf("values = (scan-delay=%v, port=%d), want (0s, 0)", time.Duration(c.ScanDelay), c.Port)
+		}
+	})
+}
+
 func TestDecodeConfigRejectsUnknownKey(t *testing.T) {
 	if _, err := decodeConfig(strings.NewReader("prot: 4040\n")); err == nil {
 		t.Fatal("decodeConfig returned nil error for an unknown key")
