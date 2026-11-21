@@ -31,7 +31,6 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, 
 		Log:     log,
 		Prepare: func(req *http.Request) {
 			req.Header.Set("X-Emby-Token", token)
-			req.Header.Set("Accept", "application/json") // Force JSON Response.
 		},
 		AuthMessage: "invalid emby token",
 	})

@@ -241,6 +241,9 @@ func TestSendBuildsRequest(t *testing.T) {
 	if h := got.Header.Get("X-Token"); h != "token" {
 		t.Errorf("X-Token header = %q, want token", h)
 	}
+	if h := got.Header.Get("Accept"); h != "application/json" {
+		t.Errorf("Accept header = %q, want application/json", h)
+	}
 }
 
 func TestFailedRequestLogRemovesSecrets(t *testing.T) {

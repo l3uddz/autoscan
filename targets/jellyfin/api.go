@@ -34,7 +34,6 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) (apiClient, 
 			} else {
 				req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s"`, token))
 			}
-			req.Header.Set("Accept", "application/json") // Force JSON Response.
 		},
 		AuthMessage:  "invalid jellyfin token",
 		SecretParams: []string{apiKeyParam},

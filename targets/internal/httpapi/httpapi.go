@@ -133,81 +133,63 @@ func parseBaseURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// Send sends a request without a body and closes the response body.
+// Send sends a request without a body and ignores the response body.
 // elem are the path elements after the base URL. If query is not nil, it
 // is the query of the request URL. ctx ends the request.
 func (c *Client) Send(ctx context.Context, method string, query url.Values, elem ...string) error {
-	req, err := c.newRequest(ctx, method, query, nil, elem)
-	if err != nil {
-		return err
-	}
-
-	res, err := c.do(req)
-	if err != nil {
-		return err
-	}
-
-	// The server accepted the request, so a failed close does not fail it.
-	res.Body.Close()
-	return nil
+	return c.send(ctx, method, query, nil, nil, elem)
 }
 
-// PostJSON sends v as the JSON body of a POST request and closes the
+// PostJSON sends v as the JSON body of a POST request and ignores the
 // response body.
 func (c *Client) PostJSON(ctx context.Context, v any, elem ...string) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("encoding request body: %w", err)
-	}
-
-	req, err := c.newRequest(ctx, http.MethodPost, nil, bytes.NewReader(b), elem)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := c.do(req)
-	if err != nil {
-		return err
-	}
-
-	res.Body.Close()
-	return nil
+	return c.send(ctx, http.MethodPost, nil, v, nil, elem)
 }
 
 // GetJSON sends a GET request and decodes the JSON response body into v.
 func (c *Client) GetJSON(ctx context.Context, v any, elem ...string) error {
-	req, err := c.newRequest(ctx, http.MethodGet, nil, nil, elem)
+	return c.send(ctx, http.MethodGet, nil, nil, v, elem)
+}
+
+// send sends a request for the path elements elem after the base URL. If
+// in is not nil, it is the JSON body. If out is not nil, send decodes the
+// JSON response body into it. JoinPath returns a new URL, so Prepare can
+// change the request URL without changing the base URL.
+func (c *Client) send(ctx context.Context, method string, query url.Values, in any, out any, elem []string) error {
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return fmt.Errorf("encoding request body: %w", err)
+		}
+		body = bytes.NewReader(b)
+	}
+
+	u := c.base.JoinPath(elem...)
+	u.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return err
+		return fmt.Errorf("creating request: %w", withoutURL(err))
+	}
+	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	res, err := c.do(req)
 	if err != nil {
 		return err
 	}
+	// The server accepted the request, so a failed close does not fail it.
 	defer res.Body.Close()
 
-	if err := json.NewDecoder(res.Body).Decode(v); err != nil {
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
 		return bodyError("decoding response", err)
 	}
-
 	return nil
-}
-
-// newRequest returns a request for the path elements elem after the base
-// URL. JoinPath returns a new URL, so Prepare can change the request URL
-// without changing the base URL.
-func (c *Client) newRequest(ctx context.Context, method string, query url.Values, body io.Reader, elem []string) (*http.Request, error) {
-	u := c.base.JoinPath(elem...)
-	u.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", withoutURL(err))
-	}
-
-	return req, nil
 }
 
 // do prepares and sends req, and returns the response for a 2xx status.
