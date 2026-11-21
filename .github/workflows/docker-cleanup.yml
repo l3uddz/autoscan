@@ -13,10 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
 
+      # ci.yml makes the branch tag with the same script. The script fails for
+      # a reserved tag or a tag that another branch uses, so the job never
+      # removes an image that belongs to something else. The password and the
+      # token stay out of the process arguments: jq reads the password from
+      # the environment, and curl reads the header from stdin. A tag that
+      # never existed, such as one of a branch without a PR, is no error.
       - name: remove docker tag
         shell: bash
         env:
@@ -26,27 +32,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ci.yml makes the branch tag with the same script. The script
-          # fails for a reserved tag or a tag that another branch uses, so
-          # the job never removes an image that belongs to something else.
           tag="$(.github/scripts/docker-branch-tag.sh "$BRANCH")"
+          image="l3uddz/autoscan:$tag"
 
-          token="$(jq -n --arg username "$DOCKER_USERNAME" --arg password "$DOCKER_PASSWORD" \
-              '{username: $username, password: $password}' \
-            | curl -sS --fail-with-body -H 'Content-Type: application/json' --data @- \
-              https://hub.docker.com/v2/users/login/ \
-            | jq -r '.token // empty')"
+          token="$(jq -n '{username: env.DOCKER_USERNAME, password: env.DOCKER_PASSWORD}' |
+            curl -sS --fail-with-body -H 'Content-Type: application/json' --data @- \
+              https://hub.docker.com/v2/users/login/ |
+            jq -r '.token // empty')"
           if [ -z "$token" ]; then
-            echo "Docker Hub login returned no token" >&2
+            echo "::error::Docker Hub login returned no token"
             exit 1
           fi
           echo "::add-mask::$token"
 
-          status="$(curl -sS --globoff -o /dev/null -w '%{http_code}' -X DELETE \
-            -H "Authorization: JWT $token" \
-            "https://hub.docker.com/v2/repositories/l3uddz/autoscan/tags/${tag}/")"
+          status="$(printf 'Authorization: JWT %s\n' "$token" |
+            curl -sS --globoff -o /dev/null -w '%{http_code}' -X DELETE -H @- \
+              "https://hub.docker.com/v2/repositories/l3uddz/autoscan/tags/$tag/")"
           case "$status" in
-            204) echo "Removed l3uddz/autoscan:${tag}" ;;
-            404) echo "No image tag l3uddz/autoscan:${tag}" ;;
-            *) echo "Removing l3uddz/autoscan:${tag} failed with HTTP $status" >&2; exit 1 ;;
+            204) echo "removed: $image" ;;
+            404) echo "no such tag: $image" ;;
+            *)
+              echo "::error::removing $image failed with status $status"
+              exit 1
+              ;;
           esac

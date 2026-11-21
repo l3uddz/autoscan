@@ -12,7 +12,8 @@ on:
     branches:
       - master
 
-# Only the release job writes repository contents. Every other job reads.
+# Runs only read the repository. The release job of a v* tag gets write
+# access, because goreleaser publishes a GitHub release.
 permissions:
   contents: read
 
@@ -30,49 +31,41 @@ jobs:
   # advisory does not block unrelated pull requests.
   govulncheck:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: checkout
-        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # tools: go and goreleaser, at the versions in mise.toml
       - name: mise
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
-  # build checks and packages branches and pull requests. It is the required
-  # check. The release job handles v* tags.
+  # The master protection ruleset requires a check named build, so this job
+  # keeps its name. A v* tag runs the release job instead, with the same steps.
   build:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
-    steps:
-      # dependencies
-      - name: buildx
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
-
+    steps: &steps
       # checkout
       - name: checkout
-        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       # tools: go and goreleaser, at the versions in mise.toml
       - name: mise
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
 
       - name: tool info
         run: |
           go version
-          go env
           goreleaser --version
 
       # cache
       - name: cache-go
-        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3.5.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -96,143 +89,75 @@ jobs:
       - name: lint
         run: mise run lint
 
-      # git status
-      - name: git status
-        run: git status
-
-      # The branch tag comes from docker-branch-tag.sh, which docker-cleanup.yml
-      # also uses. A fork PR publishes no image, so it needs no tag.
-      - name: image tag
+      # Docker tags: the version and latest for a v* tag. Otherwise the
+      # branch tag from docker-branch-tag.sh, which docker-cleanup.yml also
+      # uses. This step runs before publish, so a version that is not a valid
+      # Docker tag stops the run before goreleaser makes a GitHub release.
+      - name: image tags
         id: image
-        if: ${{ !github.event.pull_request.head.repo.fork }}
         env:
-          BRANCH: ${{ github.head_ref || github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
-          tag="$(.github/scripts/docker-branch-tag.sh "$BRANCH")"
-          echo "tag=$IMAGE:$tag" >> "$GITHUB_OUTPUT"
+          if [ "$REF_TYPE" = "tag" ]; then
+            version="${REF_NAME#v}"
+            if [[ ! "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::version '$version' is not a valid Docker tag"
+              exit 1
+            fi
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+            printf 'tags<<EOF\n%s:%s\n%s:latest\nEOF\n' "$IMAGE" "$version" "$IMAGE" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+            # A fork PR publishes no image, so it needs no branch tag.
+            if [ "$FORK" != "true" ]; then
+              tag="$(.github/scripts/docker-branch-tag.sh "${HEAD_REF:-$REF_NAME}")"
+              echo "tags=$IMAGE:$tag" >> "$GITHUB_OUTPUT"
+            fi
+          fi
 
       # build
       - name: build
+        if: steps.image.outputs.is_tag == 'false'
         run: mise run snapshot
-
-      # artifacts
-      - name: artifact_linux
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: build_linux
-          path: dist/*linux*
-
-      - name: artifact_darwin
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: build_darwin
-          path: dist/*darwin*
-
-      # docker login
-      - name: docker login
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
-
-      # docker build (branch)
-      - name: docker - build branch
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          pull: true
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: ${{ steps.image.outputs.tag }}
-
-      # cleanup
-      - name: cleanup
-        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        run: rm -f "$HOME/.docker/config.json"
-
-  # release publishes the GitHub release and the release Docker tags for a v*
-  # tag. It is the only job that writes repository contents.
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      # dependencies
-      - name: buildx
-        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2.10.0
-
-      # checkout
-      - name: checkout
-        uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3.7.0
-        with:
-          fetch-depth: 0
-
-      # tools: go and goreleaser, at the versions in mise.toml
-      - name: mise
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
-
-      # vendor, test, and lint before the release
-      - name: vendor
-        run: mise run vendor
-
-      - name: tests
-        run: mise run test
-
-      - name: lint
-        run: mise run lint
-
-      # This step runs before publish, so a version that is not a valid
-      # Docker tag stops the run before goreleaser makes a GitHub release.
-      - name: version
-        id: version
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          version="${REF_NAME#v}"
-          if [[ ! "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "::error::version '$version' is not a valid Docker tag"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # publish
       - name: publish
+        if: steps.image.outputs.is_tag == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REF: ${{ github.ref }}
         run: mise run publish
 
       # artifacts
       - name: artifact_linux
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build_linux
           path: dist/*linux*
 
       - name: artifact_darwin
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build_darwin
           path: dist/*darwin*
 
-      # docker login
-      - name: docker login
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
+      # docker
+      - name: buildx
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # docker build (latest & tag)
-      - name: docker - build release
-        uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
+      - name: docker login
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: docker build
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ./docker/Dockerfile
@@ -241,11 +166,13 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ steps.image.outputs.tags }}
 
-      # cleanup
-      - name: cleanup
-        if: always()
-        run: rm -f "$HOME/.docker/config.json"
+  # release publishes the GitHub release and the release Docker tags for a v*
+  # tag. It is the only job that writes repository contents.
+  release:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps: *steps
