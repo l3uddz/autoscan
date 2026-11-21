@@ -62,6 +62,12 @@ Apply SOLID, KISS, DRY, and YAGNI to each code change.
 - If you add a target, add a package under `targets/`. Register it in
   `cmd/autoscan/main.go`. Send its HTTP requests with the client in
   `targets/internal/httpapi`.
+- Build URLs with `net/url`, not by joining strings. `httpapi.New` parses
+  and checks the base URL once. Pass the request path as path elements, and
+  pass the query as `url.Values`. `JoinPath` does not escape an element and
+  removes `..`, so escape a path element that comes from input with
+  `url.PathEscape` and check it. Build a host and port with
+  `net.JoinHostPort`.
 - Put webhook test payloads in the `testdata/` directory of the trigger package.
 - If you change the datastore schema, add a new numbered file such as
   `2_<name>.sql` to `processor/migrations/`. Do not edit a migration that a
