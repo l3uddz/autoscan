@@ -398,6 +398,9 @@ func TestCheckRedirect(t *testing.T) {
 	}{
 		{"Same host and port", "http://plex.invalid:32400/old", "http://plex.invalid:32400/new", http.MethodGet, false},
 		{"Upgrade to https", "http://plex.invalid/old", "https://plex.invalid/new", http.MethodGet, false},
+		{"Upgrade to https with default ports", "http://plex.invalid:80/old", "https://plex.invalid:443/new", http.MethodGet, false},
+		{"Host in other case", "http://Plex.invalid:32400/old", "http://plex.invalid:32400/new", http.MethodGet, false},
+		{"Default port left out", "http://plex.invalid:80/old", "http://plex.invalid/new", http.MethodGet, false},
 		{"Other host", "http://plex.invalid/", "http://other.invalid/", http.MethodGet, true},
 		{"Other port", "http://plex.invalid:32400/", "http://plex.invalid:8080/", http.MethodGet, true},
 		{"Downgrade to http", "https://plex.invalid/", "http://plex.invalid/", http.MethodGet, true},
