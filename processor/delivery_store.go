@@ -48,13 +48,24 @@ func (store *datastore) configureTargets(targets []Target) error {
 	`, string(configured)); err != nil {
 		return err
 	}
+	// Remove the targets that are no longer configured, their deliveries,
+	// and the scans that no target needs. Without targets, the scans stay
+	// queued for the next start.
 	if _, err := tx.Exec(`
-		DELETE FROM scan_target WHERE id NOT IN (SELECT value FROM json_each(?));
-		DELETE FROM scan_delivery WHERE target NOT IN (SELECT id FROM scan_target);
+		DELETE FROM scan_target WHERE id NOT IN (SELECT value FROM json_each(?))
+	`, string(configured)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM scan_delivery WHERE target NOT IN (SELECT id FROM scan_target)
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
 		DELETE FROM scan
 		WHERE EXISTS (SELECT 1 FROM scan_target)
 		AND NOT EXISTS (SELECT 1 FROM scan_delivery WHERE folder = scan.folder)
-	`, string(configured)); err != nil {
+	`); err != nil {
 		return err
 	}
 	return tx.Commit()
