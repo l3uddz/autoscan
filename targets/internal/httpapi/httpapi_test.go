@@ -362,3 +362,72 @@ func TestRequestDoesNotChangeBaseURL(t *testing.T) {
 		t.Errorf("base URL = %q after a request, want %q", got, want)
 	}
 }
+
+func TestRedirectToOtherMethodIsUnavailable(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+		}
+	}))
+	defer srv.Close()
+
+	err := mustNew(t, Config{BaseURL: srv.URL, Log: zerolog.Nop()}).Send(http.MethodPost, nil, "old")
+	if !errors.Is(err, autoscan.ErrTargetUnavailable) {
+		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
+	}
+	if len(methods) != 1 {
+		t.Errorf("server got %v, want only the POST", methods)
+	}
+}
+
+func TestRedirectToOtherHostIsUnavailable(t *testing.T) {
+	var leaked string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("X-Token")
+	}))
+	defer other.Close()
+	// The other server listens on localhost, this one on 127.0.0.1.
+	otherURL := strings.Replace(other.URL, "127.0.0.1", "localhost", 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, otherURL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: srv.URL,
+		Log:     zerolog.Nop(),
+		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
+	})
+	if err := c.Send(http.MethodGet, nil); !errors.Is(err, autoscan.ErrTargetUnavailable) {
+		t.Errorf("Got error %v, want %v", err, autoscan.ErrTargetUnavailable)
+	}
+	if leaked != "" {
+		t.Error("the token reached the other host")
+	}
+}
+
+func TestRedirectOnSameHostIsFollowed(t *testing.T) {
+	var gotToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+			return
+		}
+		gotToken = r.Header.Get("X-Token")
+	}))
+	defer srv.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: srv.URL,
+		Log:     zerolog.Nop(),
+		Prepare: func(req *http.Request) { req.Header.Set("X-Token", "token") },
+	})
+	if err := c.Send(http.MethodGet, nil, "old"); err != nil {
+		t.Fatalf("Send returned %v", err)
+	}
+	if gotToken != "token" {
+		t.Errorf("X-Token after the redirect = %q, want token", gotToken)
+	}
+}

@@ -454,6 +454,8 @@ The URL of a target must start with `http://` or `https://` and contain a host.
 It can contain a path, such as `https://domain.tld/plex` for a reverse proxy, and `user:password@` for Basic authentication.
 It must not contain a query or a fragment, so put the token in the `token` field.
 If the URL is not valid, the target does not connect, and Autoscan logs the error and retries it.
+Autoscan follows a redirect only to the same host name with the same method, for example from `http://` to `https://`.
+Any other redirect counts as an unavailable target, and the scans stay queued. In that case, set the URL to the address that answers.
 
 Autoscan identifies a target by its type and full configured URL.
 If several entries use the same type and URL, their order distinguishes them.

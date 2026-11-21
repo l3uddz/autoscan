@@ -61,10 +61,32 @@ func New(c Config) (*Client, error) {
 	}
 
 	return &Client{
-		client: &http.Client{Timeout: timeout},
+		client: &http.Client{Timeout: timeout, CheckRedirect: checkRedirect},
 		base:   base,
 		config: c,
 	}, nil
+}
+
+// maxRedirects is how many redirects a request follows, as in Go's default.
+const maxRedirects = 10
+
+// errRedirect means that the target redirected a request to another host,
+// or that the redirect changed the method, such as a POST to a GET. The
+// token headers must not reach another host, and a scan sent as a GET is
+// lost. The error marks the target unavailable, so the scans stay queued.
+var errRedirect = errors.New("target redirected the request to another host or method, set the target url to the address that answers")
+
+// checkRedirect follows a redirect only to the same host name with the same
+// method, such as from http to https.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	first := via[0]
+	if req.URL.Hostname() != first.URL.Hostname() || req.Method != first.Method {
+		return errRedirect
+	}
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	return nil
 }
 
 // parseBaseURL parses the base URL of a target. A path prefix, such as
