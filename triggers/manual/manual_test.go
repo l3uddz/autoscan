@@ -56,6 +56,37 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			"Returns bad request for an empty directory",
+			Given{
+				Config: standardConfig,
+				Query:  url.Values{"dir": []string{""}},
+			},
+			Expected{
+				StatusCode: 400,
+			},
+		},
+		{
+			"Returns bad request for a relative directory",
+			Given{
+				Config: standardConfig,
+				Query:  url.Values{"dir": []string{"tv/Show"}},
+			},
+			Expected{
+				StatusCode: 400,
+			},
+		},
+		{
+			"Returns 200 for a relative directory that the rewrite makes absolute",
+			Given{
+				Config: Config{Rewrite: []autoscan.Rewrite{{From: "^tv/", To: "/mnt/tv/"}}},
+				Query:  url.Values{"dir": []string{"tv/Show"}},
+			},
+			Expected{
+				StatusCode: 200,
+				Scans:      []autoscan.Scan{{Folder: "/mnt/tv/Show", Time: currentTime}},
+			},
+		},
+		{
 			"Returns 200 when given multiple directories",
 			Given{
 				Config: standardConfig,

@@ -57,6 +57,17 @@ func TestHandler(t *testing.T) {
 			WantFolders: []string{"/mnt/tv/b", "/mnt/tv/a"},
 		},
 		{
+			Name:       "Returns 400 when a folder is relative after the rewrite",
+			Event:      Event{Type: "Download", Folders: []string{"/data/tv/a", "tv/b"}},
+			WantStatus: http.StatusBadRequest,
+		},
+		{
+			Name:        "Accepts Windows folders",
+			Event:       Event{Type: "Download", Folders: []string{`C:\TV\Show`, `\\server\tv\Show`}},
+			WantStatus:  http.StatusOK,
+			WantFolders: []string{`C:\TV\Show`, `\\server\tv\Show`},
+		},
+		{
 			Name:       "Returns 200 without a scan when the rewrite empties the folder",
 			Event:      Event{Type: "Download", Folders: []string{"/data/drop"}},
 			WantStatus: http.StatusOK,

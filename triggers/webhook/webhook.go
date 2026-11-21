@@ -31,6 +31,10 @@ type Config struct {
 // ErrMissingFields means that an event lacks a field that the trigger needs.
 var ErrMissingFields = errors.New("required fields are missing")
 
+// errRelativeFolder means that a folder is not an absolute path after the
+// rewrite. A media server cannot find such a folder.
+var errRelativeFolder = errors.New("folder is not an absolute path after the rewrite")
+
 // An Event is what a trigger reads from one webhook request.
 type Event struct {
 	// Type is the event type, for logs. The -arrs send the type "Test"
@@ -95,7 +99,12 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scans := h.scans(event.Folders)
+	scans, err := h.scans(event.Folders)
+	if err != nil {
+		rlog.Error().Err(err).Msg("Invalid request")
+		rw.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	if len(scans) == 0 {
 		rlog.Debug().Str("event", event.Type).Msg("No folders to scan")
 		rw.WriteHeader(http.StatusOK)
@@ -132,8 +141,9 @@ func (h handler) withLogLevel(r *http.Request) *http.Request {
 
 // scans rewrites each folder and returns one scan for each unique result.
 // It keeps the order of the folders. It skips a folder that is empty before
-// or after the rewrite, so the processor never gets a scan for "".
-func (h handler) scans(folders []string) []autoscan.Scan {
+// or after the rewrite, so the processor never gets a scan for "". It
+// returns an error if a folder is not an absolute path after the rewrite.
+func (h handler) scans(folders []string) ([]autoscan.Scan, error) {
 	seen := make(map[string]bool, len(folders))
 	scans := make([]autoscan.Scan, 0, len(folders))
 
@@ -146,6 +156,9 @@ func (h handler) scans(folders []string) []autoscan.Scan {
 		if folder == "" || seen[folder] {
 			continue
 		}
+		if !absolutePath(folder) {
+			return nil, fmt.Errorf("%w: %s", errRelativeFolder, folder)
+		}
 
 		seen[folder] = true
 		scans = append(scans, autoscan.Scan{
@@ -155,7 +168,7 @@ func (h handler) scans(folders []string) []autoscan.Scan {
 		})
 	}
 
-	return scans
+	return scans, nil
 }
 
 // maxBodyBytes is the largest webhook body that DecodeJSON reads.
@@ -219,6 +232,11 @@ func windowsPath(p string) bool {
 	hasDrive := len(p) >= 2 && p[1] == ':' &&
 		('a' <= p[0] && p[0] <= 'z' || 'A' <= p[0] && p[0] <= 'Z')
 	return hasDrive || strings.HasPrefix(p, `\\`)
+}
+
+// absolutePath reports whether p is an absolute Unix or Windows path.
+func absolutePath(p string) bool {
+	return strings.HasPrefix(p, "/") || windowsPath(p)
 }
 
 // ParentFolder returns the folder of the file at the absolute path file.

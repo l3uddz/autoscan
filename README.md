@@ -70,6 +70,8 @@ This field can contain multiple rules.
 Start each rule with a `-`.
 The `from` field is a regular expression (regexp) that matches the path as the trigger sees it.
 The `to` field converts that path into a path that is local to Autoscan.
+After the rewrite, each folder of a webhook trigger must be an absolute path, such as `/mnt/tv` or `C:\TV`.
+If a folder is still relative, the trigger responds with 400 Bad Request and queues no scan for that request.
 
 Targets work the other way around.
 A target converts the path that is local to Autoscan into a path that the target understands.
@@ -168,6 +170,7 @@ The manual endpoint is at `/triggers/manual`.
 
 The manual endpoint accepts one or more directory paths.
 Give each path in a `dir` query parameter.
+An empty `dir` value returns 400 Bad Request.
 If the configuration file sets a username and a password in the `authentication` option, the manual webhook uses basic authentication.
 The other webhooks use the same authentication.
 

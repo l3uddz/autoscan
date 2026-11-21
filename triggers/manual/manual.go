@@ -50,7 +50,10 @@ func New(c Config, callback autoscan.ProcessorFunc) (http.Handler, error) {
 	}), nil
 }
 
-var errNoDirectory = errors.New("manual webhook should receive at least one directory")
+var (
+	errNoDirectory    = errors.New("manual webhook should receive at least one directory")
+	errEmptyDirectory = errors.New("manual webhook received an empty directory")
+)
 
 func parse(r *http.Request) (webhook.Event, error) {
 	directories := r.URL.Query()["dir"]
@@ -62,6 +65,10 @@ func parse(r *http.Request) (webhook.Event, error) {
 
 	event := webhook.Event{Type: "Manual"}
 	for _, dir := range directories {
+		// path.Clean turns "" into ".", so check before it.
+		if dir == "" {
+			return webhook.Event{}, errEmptyDirectory
+		}
 		event.Folders = append(event.Folders, path.Clean(dir))
 	}
 
