@@ -1,6 +1,7 @@
 package inotify
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"testing/synctest"
@@ -14,13 +15,15 @@ func TestRetryDoublesDelayUntilSuccess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
 		failures := 3
-		retry(zerolog.Nop(), "Failed", "/mnt/tv", func() error {
+		if !retry(t.Context(), zerolog.Nop(), "Failed", "/mnt/tv", func() error {
 			if failures == 0 {
 				return nil
 			}
 			failures--
 			return errors.New("missing")
-		})
+		}) {
+			t.Fatal("retry returned false, want true")
+		}
 
 		if elapsed, want := time.Since(start), 35*time.Second; elapsed != want {
 			t.Errorf("retry took %v, want %v for delays of 5s, 10s, and 20s", elapsed, want)
@@ -31,16 +34,40 @@ func TestRetryDoublesDelayUntilSuccess(t *testing.T) {
 func TestRetryCapsDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts []time.Time
-		retry(zerolog.Nop(), "Failed", "/mnt/tv", func() error {
+		if !retry(t.Context(), zerolog.Nop(), "Failed", "/mnt/tv", func() error {
 			attempts = append(attempts, time.Now())
 			if len(attempts) < 9 {
 				return errors.New("missing")
 			}
 			return nil
-		})
+		}) {
+			t.Fatal("retry returned false, want true")
+		}
 
 		if gap := attempts[8].Sub(attempts[7]); gap != watchRetryMax {
 			t.Errorf("Last retry delay = %v, want %v", gap, watchRetryMax)
+		}
+	})
+}
+
+func TestRetryStopsWhenContextCancels(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan bool, 1)
+		go func() {
+			done <- retry(ctx, zerolog.Nop(), "Failed", "/mnt/tv", func() error {
+				return errors.New("missing")
+			})
+		}()
+
+		synctest.Wait()
+		start := time.Now()
+		cancel()
+		if ok := <-done; ok {
+			t.Error("retry returned true after cancellation, want false")
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("retry waited %v after cancellation, want immediate exit", elapsed)
 		}
 	})
 }
@@ -57,7 +84,7 @@ func TestRootLostDuringSetupIsWatchedAgain(t *testing.T) {
 	// The walk starts, then the root is removed before the walk marks the
 	// path as watched.
 	losses := p.losses.Load()
-	trigger.rewatchLostRoot(fsnotify.Event{Name: "/mnt/tv", Op: fsnotify.Remove})
+	trigger.rewatchLostRoot(fsnotify.Event{Name: "/mnt/tv", Op: fsnotify.Remove}, func(*path) {})
 
 	p.watching.Store(true)
 	watched, again := checkRootLoss(p, losses)

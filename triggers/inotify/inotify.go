@@ -3,6 +3,7 @@
 package inotify
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -125,32 +127,48 @@ func (t *Trigger) Status() Status {
 	return status
 }
 
-// Run watches the paths and handles their events. It does not return.
+// Run watches the paths and handles their events until ctx ends.
 // Each path starts on its own. If a path fails, Run tries it again later,
-// so one failed path does not stop the others.
-func (t *Trigger) Run() {
-	retry(t.log, "Failed creating filesystem watcher", "", func() (err error) {
+// so one failed path does not stop the others. When ctx ends, Run closes
+// the watcher and flushes pending scans to the processor.
+func (t *Trigger) Run(ctx context.Context) {
+	if !retry(ctx, t.log, "Failed creating filesystem watcher", "", func() (err error) {
 		t.watcher, err = fsnotify.NewWatcher()
 		return err
-	})
+	}) {
+		return
+	}
 	t.queue = newQueue(t.callback, t.log, t.priority)
 
+	var watchWG sync.WaitGroup
+	startWatch := func(p *path) {
+		watchWG.Go(func() {
+			t.watchPath(ctx, p)
+		})
+	}
 	for _, p := range t.paths {
-		go t.watchPath(p)
+		startWatch(p)
 	}
 
-	t.worker()
+	t.worker(ctx, startWatch)
+	watchWG.Wait()
+	if err := t.watcher.Close(); err != nil {
+		t.log.Warn().Err(err).Msg("Failed closing filesystem watcher")
+	}
+	t.queue.stop()
 }
 
-// watchPath watches the tree at p and tries again until it succeeds.
-func (t *Trigger) watchPath(p *path) {
+// watchPath watches the tree at p and tries again until it succeeds or ctx ends.
+func (t *Trigger) watchPath(ctx context.Context, p *path) {
 	for {
 		var losses int64
-		retry(t.log, "Failed watching path", p.Path, func() error {
+		if !retry(ctx, t.log, "Failed watching path", p.Path, func() error {
 			losses = p.losses.Load()
-			_, err := t.watchTree(p.Path)
+			_, err := t.watchTree(ctx, p.Path)
 			return err
-		})
+		}) {
+			return
+		}
 
 		p.watching.Store(true)
 		watched, again := checkRootLoss(p, losses)
@@ -183,14 +201,18 @@ func checkRootLoss(p *path, losses int64) (watched bool, again bool) {
 	return false, p.watching.CompareAndSwap(true, false)
 }
 
-// retry calls try until it returns nil. It logs each error with msg and path
-// and waits a longer delay after each failure.
-func retry(log zerolog.Logger, msg string, path string, try func() error) {
+// retry calls try until it returns nil or ctx ends. It logs each error with
+// msg and path and waits a longer delay after each failure. It returns true
+// when try succeeded.
+func retry(ctx context.Context, log zerolog.Logger, msg string, path string, try func() error) bool {
 	delay := watchRetryMin
 	for {
 		err := try()
 		if err == nil {
-			return
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
 		}
 
 		log.Error().
@@ -198,7 +220,11 @@ func retry(log zerolog.Logger, msg string, path string, try func() error) {
 			Str("path", path).
 			Dur("retry_in", delay).
 			Msg(msg)
-		time.Sleep(delay)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(delay):
+		}
 		delay = min(watchRetryMax, 2*delay)
 	}
 }
@@ -211,9 +237,12 @@ func retry(log zerolog.Logger, msg string, path string, try func() error) {
 // directory without permission or one that a user removed during the walk.
 // The inotify watch limit fails the walk, because a retry can succeed after
 // the user raises the limit.
-func (t *Trigger) watchTree(root string) (bool, error) {
+func (t *Trigger) watchTree(ctx context.Context, root string) (bool, error) {
 	hasFile := false
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err == nil && !d.IsDir() {
 			if path == root {
 				return fmt.Errorf("%v: not a directory", path)
@@ -302,18 +331,16 @@ func isWithin(name, root string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (t *Trigger) worker() {
+func (t *Trigger) worker(ctx context.Context, startWatch func(*path)) {
 	// process events
 	for {
 		select {
+		case <-ctx.Done():
+			return
+
 		case event, ok := <-t.watcher.Events:
-			if !ok {
+			if !ok || !t.handleEvent(ctx, event, startWatch) {
 				return
-			}
-			t.rewatchLostRoot(event)
-			if name, ok := t.scanPath(event); ok {
-				// move to queue
-				t.queue.inputs <- name
 			}
 
 		case err, ok := <-t.watcher.Errors:
@@ -327,9 +354,23 @@ func (t *Trigger) worker() {
 	}
 }
 
+func (t *Trigger) handleEvent(ctx context.Context, event fsnotify.Event, startWatch func(*path)) bool {
+	t.rewatchLostRoot(event, startWatch)
+	name, ok := t.scanPath(ctx, event)
+	if !ok {
+		return true
+	}
+	select {
+	case t.queue.inputs <- name:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // rewatchLostRoot releases watches below a removed or renamed path, and
 // restarts watching any configured root that was lost.
-func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
+func (t *Trigger) rewatchLostRoot(event fsnotify.Event, startWatch func(*path)) {
 	if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 		return
 	}
@@ -359,13 +400,13 @@ func (t *Trigger) rewatchLostRoot(event fsnotify.Event) {
 		t.log.Warn().
 			Str("path", p.Path).
 			Msg("Watched path was removed, watching it again when it exists")
-		go t.watchPath(p)
+		startWatch(p)
 	}
 }
 
 // scanPath handles a filesystem event. It returns the path to scan and
 // reports whether the event needs a scan.
-func (t *Trigger) scanPath(event fsnotify.Event) (string, bool) {
+func (t *Trigger) scanPath(ctx context.Context, event fsnotify.Event) (string, bool) {
 	// new filesystem event
 	t.log.Trace().
 		Interface("event", event).
@@ -375,7 +416,7 @@ func (t *Trigger) scanPath(event fsnotify.Event) (string, bool) {
 	switch {
 	case event.Has(fsnotify.Create):
 		var ok bool
-		isDir, isFile, ok = t.handleCreate(event.Name)
+		isDir, isFile, ok = t.handleCreate(ctx, event.Name)
 		if !ok {
 			return "", false
 		}
@@ -414,7 +455,7 @@ func (t *Trigger) scanPath(event fsnotify.Event) (string, bool) {
 	return rewritten, true
 }
 
-func (t *Trigger) handleCreate(name string) (isDir bool, isFile bool, ok bool) {
+func (t *Trigger) handleCreate(ctx context.Context, name string) (isDir bool, isFile bool, ok bool) {
 	fi, err := os.Stat(name)
 	if err != nil {
 		t.log.Error().
@@ -429,8 +470,8 @@ func (t *Trigger) handleCreate(name string) (isDir bool, isFile bool, ok bool) {
 	}
 
 	// watch new directories and scan them only if they contain a file
-	hasFile, err := t.watchTree(name)
-	if err != nil {
+	hasFile, err := t.watchTree(ctx, name)
+	if err != nil && ctx.Err() == nil {
 		t.log.Error().
 			Err(err).
 			Str("path", name).
@@ -468,6 +509,7 @@ type queue struct {
 	log      zerolog.Logger
 	priority int
 	inputs   chan string
+	done     chan struct{}
 	scans    map[string]pendingScan
 }
 
@@ -477,6 +519,7 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 		log:      log,
 		priority: priority,
 		inputs:   make(chan string),
+		done:     make(chan struct{}),
 		scans:    make(map[string]pendingScan),
 	}
 
@@ -485,7 +528,13 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 	return q
 }
 
+func (q *queue) stop() {
+	close(q.inputs)
+	<-q.done
+}
+
 func (q *queue) worker() {
+	defer close(q.done)
 	ticker := time.NewTicker(queueInterval)
 	defer ticker.Stop()
 
@@ -493,7 +542,7 @@ func (q *queue) worker() {
 		select {
 		case path, ok := <-q.inputs:
 			if !ok {
-				// channel closed
+				q.flush()
 				return
 			}
 
@@ -507,6 +556,37 @@ func (q *queue) worker() {
 		case <-ticker.C:
 			q.process()
 		}
+	}
+}
+
+func (q *queue) flush() {
+	if len(q.scans) == 0 {
+		return
+	}
+
+	now := time.Now()
+	scans := make([]autoscan.Scan, 0, len(q.scans))
+	for path := range q.scans {
+		scans = append(scans, autoscan.Scan{
+			Folder:   filepath.Clean(path),
+			Priority: q.priority,
+			Time:     now,
+		})
+	}
+
+	if err := q.callback(scans...); err != nil {
+		q.log.Error().
+			Err(err).
+			Int("count", len(scans)).
+			Msg("Failed flushing pending scans to processor during shutdown")
+		return
+	}
+
+	clear(q.scans)
+	for _, scan := range scans {
+		q.log.Info().
+			Str("path", scan.Folder).
+			Msg("Scan flushed to processor")
 	}
 }
 

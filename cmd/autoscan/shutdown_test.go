@@ -5,8 +5,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/l3uddz/autoscan"
+	"github.com/l3uddz/autoscan/processor"
+	"github.com/l3uddz/autoscan/triggers/inotify"
 )
 
 func TestShutdownFinishesOpenRequests(t *testing.T) {
@@ -129,5 +135,40 @@ func TestShutdownStopsEveryServerWhileOneWaits(t *testing.T) {
 			t.Fatal("the second server still accepts connections while the first waits")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestScanStatsStopsOnCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		proc, _ := newRouterTestProcessor(t, processor.Config{})
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			scanStats(ctx, proc, time.Hour)
+		}()
+
+		synctest.Wait()
+		start := time.Now()
+		cancel()
+		<-done
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("scanStats waited %v after cancellation, want immediate exit", elapsed)
+		}
+	})
+}
+
+func TestNewWatchersCollectsAllErrors(t *testing.T) {
+	configs := []inotify.Config{
+		{Paths: []inotify.PathConfig{{Path: ""}}},
+		{Paths: []inotify.PathConfig{{Path: "/mnt/tv", Rewrite: []autoscan.Rewrite{{From: "("}}}}},
+	}
+
+	watchers, err := newWatchers(configs, func(...autoscan.Scan) error { return nil })
+	if watchers != nil {
+		t.Errorf("newWatchers returned %v with an error", watchers)
+	}
+	if err == nil || !strings.Contains(err.Error(), "inotify-1") || !strings.Contains(err.Error(), "inotify-2") {
+		t.Errorf("newWatchers error = %v, want errors naming inotify-1 and inotify-2", err)
 	}
 }

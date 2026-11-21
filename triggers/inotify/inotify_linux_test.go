@@ -3,6 +3,7 @@
 package inotify
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -44,7 +45,7 @@ func newWatchingDaemon(t *testing.T, root string) *Trigger {
 		log:     zerolog.Nop(),
 	}
 
-	if _, err := d.watchTree(root); err != nil {
+	if _, err := d.watchTree(t.Context(), root); err != nil {
 		t.Fatal(err)
 	}
 
@@ -60,8 +61,8 @@ func receiveScans(t *testing.T, d *Trigger) []string {
 	for {
 		select {
 		case event := <-d.watcher.Events:
-			d.rewatchLostRoot(event)
-			if name, ok := d.scanPath(event); ok {
+			d.rewatchLostRoot(event, func(p *path) { go d.watchPath(t.Context(), p) })
+			if name, ok := d.scanPath(t.Context(), event); ok {
 				scans = append(scans, name)
 			}
 		case err := <-d.watcher.Errors:
@@ -184,7 +185,7 @@ func TestWatchTreeSkipsUnreadableSubdirectory(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
 	trigger := newTestTrigger(t, root)
-	if _, err := trigger.watchTree(root); err != nil {
+	if _, err := trigger.watchTree(t.Context(), root); err != nil {
 		t.Fatalf("watchTree returned %v, want the unreadable directory skipped", err)
 	}
 
@@ -199,7 +200,7 @@ func TestWatchTreeFailsForMissingRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing")
 	trigger := newTestTrigger(t, root)
 
-	if _, err := trigger.watchTree(root); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := trigger.watchTree(t.Context(), root); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("watchTree returned %v, want a not-exist error", err)
 	}
 }
@@ -208,7 +209,7 @@ func TestStatusCountsWatchedPaths(t *testing.T) {
 	watched := t.TempDir()
 	trigger := newTestTrigger(t, watched, filepath.Join(t.TempDir(), "missing"))
 
-	trigger.watchPath(trigger.paths[0])
+	trigger.watchPath(t.Context(), trigger.paths[0])
 
 	if got, want := trigger.Status(), (Status{Paths: 2, Watching: 1}); got != want {
 		t.Errorf("Status = %+v, want %+v", got, want)
@@ -220,7 +221,7 @@ func TestWatchTreeFailsForFileRoot(t *testing.T) {
 	writeFile(t, root)
 	trigger := newTestTrigger(t, root)
 
-	if _, err := trigger.watchTree(root); err == nil {
+	if _, err := trigger.watchTree(t.Context(), root); err == nil {
 		t.Error("watchTree returned no error for a root that is a file")
 	}
 }
@@ -229,7 +230,7 @@ func TestRemovedRootIsWatchedAgain(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "media")
 	mkdirAll(t, root)
 	trigger := newTestTrigger(t, root)
-	trigger.watchPath(trigger.paths[0])
+	trigger.watchPath(t.Context(), trigger.paths[0])
 
 	if err := os.Remove(root); err != nil {
 		t.Fatal(err)
@@ -237,7 +238,7 @@ func TestRemovedRootIsWatchedAgain(t *testing.T) {
 	waitFor(t, 2*time.Second, "the removed root to be not watched", func() bool {
 		select {
 		case event := <-trigger.watcher.Events:
-			trigger.rewatchLostRoot(event)
+			trigger.rewatchLostRoot(event, func(p *path) { go trigger.watchPath(t.Context(), p) })
 		case <-time.After(10 * time.Millisecond):
 		}
 		return trigger.Status().Watching == 0
@@ -267,14 +268,14 @@ func TestRenamedRootReleasesSubdirectoryWatches(t *testing.T) {
 	root, nested := filepath.Join(parent, "media"), filepath.Join(parent, "media", "tv")
 	mkdirAll(t, filepath.Join(nested, "Show"))
 	trigger := newTestTrigger(t, root, nested)
-	trigger.watchPath(trigger.paths[0])
-	trigger.watchPath(trigger.paths[1])
+	trigger.watchPath(t.Context(), trigger.paths[0])
+	trigger.watchPath(t.Context(), trigger.paths[1])
 
 	rename(t, root, filepath.Join(parent, "media.old"))
 	waitFor(t, 2*time.Second, "the renamed root to be not watched", func() bool {
 		select {
 		case event := <-trigger.watcher.Events:
-			trigger.rewatchLostRoot(event)
+			trigger.rewatchLostRoot(event, func(p *path) { go trigger.watchPath(t.Context(), p) })
 		case <-time.After(10 * time.Millisecond):
 		}
 		return trigger.Status().Watching == 0
@@ -293,15 +294,15 @@ func TestRenamedAncestorLosesNestedRoot(t *testing.T) {
 	show := filepath.Join(media, "tv", "Show")
 	mkdirAll(t, show)
 	trigger := newTestTrigger(t, media, show)
-	trigger.watchPath(trigger.paths[0])
-	trigger.watchPath(trigger.paths[1])
+	trigger.watchPath(t.Context(), trigger.paths[0])
+	trigger.watchPath(t.Context(), trigger.paths[1])
 
 	// Moving media/tv out of media loses the root media/tv/Show, but not media.
 	rename(t, filepath.Join(media, "tv"), filepath.Join(parent, "tv"))
 	waitFor(t, 2*time.Second, "the nested root to be not watched", func() bool {
 		select {
 		case event := <-trigger.watcher.Events:
-			trigger.rewatchLostRoot(event)
+			trigger.rewatchLostRoot(event, func(p *path) { go trigger.watchPath(t.Context(), p) })
 		case <-time.After(10 * time.Millisecond):
 		}
 		return !trigger.paths[1].watching.Load()
@@ -363,5 +364,34 @@ func TestScanPathCreatedFileWithoutExtensionScansParent(t *testing.T) {
 	scans := receiveScans(t, d)
 	if want := []string{show}; !slices.Equal(scans, want) {
 		t.Errorf("Got scans %q, want %q", scans, want)
+	}
+}
+
+func TestTriggerRunStopsOnCancel(t *testing.T) {
+	watched := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+	trigger, err := New(Config{
+		Paths: []PathConfig{{Path: watched}, {Path: missing}},
+	}, func(...autoscan.Scan) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		trigger.Run(ctx)
+	}()
+
+	waitFor(t, 2*time.Second, "watched path to start", func() bool {
+		return trigger.Status().Watching == 1
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Trigger.Run did not exit after context cancellation")
 	}
 }

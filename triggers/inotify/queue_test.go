@@ -136,3 +136,22 @@ func TestQueueSendsOneScanAfterDelay(t *testing.T) {
 		}
 	})
 }
+
+func TestQueueFlushesPendingScansOnStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var flushed []autoscan.Scan
+		q := newQueue(func(accepted ...autoscan.Scan) error {
+			flushed = append(flushed, accepted...)
+			return nil
+		}, zerolog.Nop(), 3)
+
+		q.inputs <- "/mnt/media/show/"
+		synctest.Wait()
+		q.stop()
+
+		want := filepath.FromSlash("/mnt/media/show")
+		if len(flushed) != 1 || flushed[0].Folder != want || flushed[0].Priority != 3 {
+			t.Errorf("Flushed scans = %+v, want one scan for %s with priority 3", flushed, want)
+		}
+	})
+}
